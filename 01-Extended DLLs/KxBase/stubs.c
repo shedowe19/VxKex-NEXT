@@ -50,7 +50,46 @@ KXBASEAPI FARPROC WINAPI Stub_GetProcAddress(
 	IN	HMODULE		ModuleHandle,
 	IN	PCSTR		ProcedureName)
 {
-	return GetProcAddress(
+	FARPROC Procedure;
+	ULONG OriginalError;
+	ULONG Index;
+	HMODULE Provider;
+	static const CHAR ExpectedProcedureName[] = "RtlGetDeviceFamilyInfoEnum";
+
+	Procedure = GetProcAddress(
 		ModuleHandle,
 		ProcedureName);
+
+	if (Procedure) {
+		return Procedure;
+	}
+
+	OriginalError = GetLastError();
+
+	if (OriginalError != ERROR_PROC_NOT_FOUND ||
+		(ULONG_PTR) ProcedureName <= 0xFFFF) {
+
+		return NULL;
+	}
+
+	for (Index = 0; Index < sizeof(ExpectedProcedureName); ++Index) {
+		if (ProcedureName[Index] != ExpectedProcedureName[Index]) {
+			return NULL;
+		}
+	}
+
+	// Keep the real NTDLL handle for Chromium's native syscall inspection.
+	// Supply only this missing procedure through the already loaded provider.
+	if (ModuleHandle == GetModuleHandleW(L"ntdll.dll")) {
+		Provider = GetModuleHandleW(L"KexDll.dll");
+
+		if (Provider) {
+			Procedure = GetProcAddress(
+				Provider,
+				"KexRtlGetDeviceFamilyInfoEnum");
+		}
+	}
+
+	SetLastError(OriginalError);
+	return Procedure;
 }

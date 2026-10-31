@@ -12,6 +12,8 @@ foreach ($architecture in @('x86', 'x64')) {
 call "$setEnv" /$architecture
 if errorlevel 1 exit /b 1
 python "$testRoot\contracts\run-tests.py" --compiler cl
+if errorlevel 1 exit /b 1
+python "$testRoot\chrome\run-tests.py" --compiler cl
 exit /b %errorlevel%
 "@ | Set-Content -LiteralPath $runner -Encoding ASCII
     try {
