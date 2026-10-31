@@ -1,199 +1,167 @@
 @echo off
-cd /D "%~dp0"
+setlocal EnableExtensions DisableDelayedExpansion
+if /I "%~1"=="/RELEASE" (set "DBGREL=Release") else (set "DBGREL=Debug")
+set "PACKAGE_OUTPUT=%~dp0..\..\KexSetup_%DBGREL%.exe"
+set "PACKAGE_PENDING=%~dp0..\..\KexSetup_%DBGREL%.pending"
+pushd "%~dp0"
+if not "%errorlevel%"=="0" goto :failed_no_push
 
-del Archive.7z >nul 2>nul
-rd /s /q Archive >nul 2>nul
+REM Remove stale outputs before doing anything that can fail.
+del /F /Q "%PACKAGE_OUTPUT%" "%PACKAGE_PENDING%" Archive.7z >nul 2>nul
+if exist "%PACKAGE_OUTPUT%" goto :stale_output
+if exist "%PACKAGE_PENDING%" goto :stale_output
+if exist Archive.7z goto :stale_output
+if exist Archive rmdir /S /Q Archive
+if exist Archive goto :stale_output
 
-if /i "%1"=="/RELEASE" (
-	SET DBGREL=Release
-) ELSE (
-	SET DBGREL=Debug
+for %%D in (Archive Archive\Core Archive\Core32 Archive\Core64 Archive\Kex32 Archive\Kex64) do (
+    mkdir "%%D" || goto :failed
+)
+call :require_file "7zS2.sfx" || goto :failed
+call :require_file "7zr.exe" || goto :failed
+call :require_file "vtrplnt.exe" || goto :failed
+
+REM Check the compiler result before POPD can replace its exit status.
+call :compile_dictionaries || goto :failed
+
+call :copy_required "..\..\%DBGREL%\KexSetup.exe" "Archive\" || goto :failed
+call :copy_required "..\..\00-Documentation\Application Compatibility List.docx" "Archive\Core\" || goto :failed
+call :copy_required "..\..\00-Documentation\Changelog.txt" "Archive\Core\" || goto :failed
+call :require_file "..\..\02-Prebuilt Data\KexDir\Certificates\ROOT.sst" || goto :failed
+xcopy "..\..\02-Prebuilt Data\KexDir\*" "Archive\Core\" /E /I /Y >nul
+if not "%errorlevel%"=="0" goto :failed
+
+REM Every built binary is mandatory in both architectures.
+for %%F in (KexDll.dll KexShlEx.dll KexCfg.exe VxlView.exe CpiwBypa.dll CpiwBypaLdr.exe VxKexLdr.exe) do (
+    call :copy_required "..\..\%DBGREL%\%%F" "Archive\Core32\" || goto :failed
+    call :copy_required "..\..\x64\%DBGREL%\%%F" "Archive\Core64\" || goto :failed
+)
+for %%F in (KxAdvapi KxBase KxCom KxCrt KxCryp KxDw KxDx KxMi KxNet KxNt KxSchanl KxUia KxUser) do (
+    call :copy_required "..\..\%DBGREL%\%%F.dll" "Archive\Kex32\" || goto :failed
+    call :copy_required "..\..\x64\%DBGREL%\%%F.dll" "Archive\Kex64\" || goto :failed
 )
 
-md Archive
-md Archive\Core
-md Archive\Core32
-md Archive\Core64
-md Archive\Kex32
-md Archive\Kex64
-
-REM
-REM Compile all MLS BDI files
-REM
-
-call "..\..\02-Prebuilt Data\Compile Dictionaries.bat"
-if %errorlevel% neq 0 (
-	pause
-	exit %errorlevel%
+REM A wildcard copy alone would silently accept a missing runtime DLL.
+for %%F in (dwrw10.dll icuuc.dll mshtmlmedia.dll msvcp_win.dll ucrtbase.dll) do (
+    call :require_file "..\..\02-Prebuilt DLLs\x86\%%F" || goto :failed
+)
+for %%F in (dwrw10.dll icuuc.dll mfdevmgr.dll msvcp_win.dll ucrtbase.dll) do (
+    call :require_file "..\..\02-Prebuilt DLLs\x64\%%F" || goto :failed
+)
+for %%F in ("..\..\02-Prebuilt DLLs\x86\*.dll") do (
+    call :copy_required "%%~F" "Archive\Kex32\" || goto :failed
+)
+for %%F in ("..\..\02-Prebuilt DLLs\x64\*.dll") do (
+    call :copy_required "%%~F" "Archive\Kex64\" || goto :failed
 )
 
-REM
-REM Bitness Agnostic Data
-REM
-
-copy ..\..\%DBGREL%\KexSetup.exe Archive\ >nul
-
-copy "..\..\00-Documentation\Application Compatibility List.docx" Archive\Core\ >nul
-copy "..\..\00-Documentation\Changelog.txt" Archive\Core\ >nul
-xcopy "..\..\02-Prebuilt Data\KexDir\*" Archive\Core\ /E >nul
-
-REM
-REM 32-bit Core
-REM
-
-copy ..\..\%DBGREL%\KexDll.dll Archive\Core32\ >nul
-copy ..\..\%DBGREL%\KexShlEx.dll Archive\Core32\ >nul
-copy ..\..\%DBGREL%\KexCfg.exe Archive\Core32\ >nul
-copy ..\..\%DBGREL%\VxlView.exe Archive\Core32\ >nul
-copy ..\..\%DBGREL%\CpiwBypa.dll Archive\Core32\ >nul
-copy ..\..\%DBGREL%\CpiwBypaLdr.exe Archive\Core32\ >nul
-copy ..\..\%DBGREL%\VxKexLdr.exe Archive\Core32\ >nul
-
-REM
-REM 32-bit Extension
-REM
-
-copy ..\..\%DBGREL%\KxAdvapi.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxBase.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxCom.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxCrt.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxCryp.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxDw.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxDx.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxMi.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxNet.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxNt.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxSchanl.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxUia.dll Archive\Kex32\ >nul
-copy ..\..\%DBGREL%\KxUser.dll Archive\Kex32\ >nul
-
-REM
-REM 64-bit Core
-REM
-
-copy ..\..\x64\%DBGREL%\KexDll.dll Archive\Core64\ >nul
-copy ..\..\x64\%DBGREL%\KexShlEx.dll Archive\Core64\ >nul
-copy ..\..\x64\%DBGREL%\KexCfg.exe Archive\Core64\ >nul
-copy ..\..\x64\%DBGREL%\VxlView.exe Archive\Core64\ >nul
-copy ..\..\x64\%DBGREL%\CpiwBypa.dll Archive\Core64\ >nul
-copy ..\..\x64\%DBGREL%\CpiwBypaLdr.exe Archive\Core64\ >nul
-copy ..\..\x64\%DBGREL%\VxKexLdr.exe Archive\Core64\ >nul
-
-REM
-REM 64-bit Extension
-REM
-
-copy ..\..\x64\%DBGREL%\KxAdvapi.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxBase.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxCom.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxCrt.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxCryp.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxDw.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxDx.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxMi.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxNet.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxNt.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxSchanl.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxUia.dll Archive\Kex64\ >nul
-copy ..\..\x64\%DBGREL%\KxUser.dll Archive\Kex64\ >nul
-
-REM
-REM Prebuilt DLLs
-REM
-
-copy "..\..\02-Prebuilt DLLs\x86\*.dll" Archive\Kex32\ >nul
-copy "..\..\02-Prebuilt DLLs\x64\*.dll" Archive\Kex64\ >nul
-
-if %DBGREL%==Debug (
-	REM Include PDBs as well
-
-	copy ..\..\%DBGREL%\KexSetup.pdb Archive\ >nul
-
-	copy ..\..\%DBGREL%\KexDll.pdb Archive\Core32\ >nul
-	copy ..\..\%DBGREL%\KexShlEx.pdb Archive\Core32\ >nul
-	copy ..\..\%DBGREL%\KexCfg.pdb Archive\Core32\ >nul
-	copy ..\..\%DBGREL%\VxlView.pdb Archive\Core32\ >nul
-	copy ..\..\%DBGREL%\CpiwBypa.pdb Archive\Core32\ >nul
-	copy ..\..\%DBGREL%\CpiwBypaLdr.pdb Archive\Core32\ >nul
-	copy ..\..\%DBGREL%\VxKexLdr.pdb Archive\Core32\ >nul
-
-	copy ..\..\%DBGREL%\KxAdvapi.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxBase.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxCom.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxCrt.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxCryp.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxDw.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxDx.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxMi.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxNet.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxNt.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxSchanl.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxUia.pdb Archive\Kex32\ >nul
-	copy ..\..\%DBGREL%\KxUser.pdb Archive\Kex32\ >nul
-
-	copy ..\..\x64\%DBGREL%\KexDll.pdb Archive\Core64\ >nul
-	copy ..\..\x64\%DBGREL%\KexShlEx.pdb Archive\Core64\ >nul
-	copy ..\..\x64\%DBGREL%\KexCfg.pdb Archive\Core64\ >nul
-	copy ..\..\x64\%DBGREL%\VxlView.pdb Archive\Core64\ >nul
-	copy ..\..\x64\%DBGREL%\CpiwBypa.pdb Archive\Core64\ >nul
-	copy ..\..\x64\%DBGREL%\CpiwBypaLdr.pdb Archive\Core64\ >nul
-	copy ..\..\x64\%DBGREL%\VxKexLdr.pdb Archive\Core64\ >nul
-
-	copy ..\..\x64\%DBGREL%\KxAdvapi.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxBase.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxCom.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxCrt.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxCryp.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxDw.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxDx.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxMi.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxNet.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxNt.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxSchanl.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxUia.pdb Archive\Kex64\ >nul
-	copy ..\..\x64\%DBGREL%\KxUser.pdb Archive\Kex64\ >nul
+if /I not "%DBGREL%"=="Debug" goto :pack
+call :copy_required "..\..\Debug\KexSetup.pdb" "Archive\" || goto :failed
+for %%F in (KexDll KexShlEx KexCfg VxlView CpiwBypa CpiwBypaLdr VxKexLdr) do (
+    call :copy_required "..\..\Debug\%%F.pdb" "Archive\Core32\" || goto :failed
+    call :copy_required "..\..\x64\Debug\%%F.pdb" "Archive\Core64\" || goto :failed
+)
+for %%F in (KxAdvapi KxBase KxCom KxCrt KxCryp KxDw KxDx KxMi KxNet KxNt KxSchanl KxUia KxUser) do (
+    call :copy_required "..\..\Debug\%%F.pdb" "Archive\Kex32\" || goto :failed
+    call :copy_required "..\..\x64\Debug\%%F.pdb" "Archive\Kex64\" || goto :failed
 )
 
-copy /y 7zS2.sfx ..\..\KexSetup_%DBGREL%.exe >nul
+:pack
+".\7zr.exe" a -y Archive.7z ".\Archive\*" -mmt1 -mx1 -m0=LZMA:d32
+if not "%errorlevel%"=="0" goto :failed
+call :require_file "Archive.7z" || goto :failed
+".\7zr.exe" t Archive.7z
+if not "%errorlevel%"=="0" goto :failed
 
+REM vtrplnt expects this exact output name before appending the archive.
+copy /Y "7zS2.sfx" "%PACKAGE_OUTPUT%" >nul
+if not "%errorlevel%"=="0" goto :failed
+".\vtrplnt.exe" /%DBGREL%
+if not "%errorlevel%"=="0" goto :failed
+copy /B "%PACKAGE_OUTPUT%"+Archive.7z "%PACKAGE_PENDING%" >nul
+if not "%errorlevel%"=="0" goto :failed
+call :require_file "%PACKAGE_PENDING%" || goto :failed
+move /Y "%PACKAGE_PENDING%" "%PACKAGE_OUTPUT%" >nul
+if not "%errorlevel%"=="0" goto :failed
 
-REM vtrplnt copies the version resources from the original kexsetup into
-REM the packed SFX version.
-REM It has to be run now because otherwise it will clobber the appended
-REM 7zip data.
+if /I not "%DBGREL%"=="Debug" goto :clean
+call :require_file "..\vautogen\vautogen.exe" || goto :failed
+"..\vautogen\vautogen.exe"
+if not "%errorlevel%"=="0" goto :failed
 
-vtrplnt.exe /%DBGREL%
+:clean
+rmdir /S /Q Archive
+if exist Archive goto :stale_output
+del /F /Q Archive.7z
+if exist Archive.7z goto :stale_output
+popd
+endlocal & exit /b 0
 
-REM ===========================================================================
-REM FOR FINAL RELEASE: switch to the upper command for higher compression
-REM ===========================================================================
-
-REM 7zr a -y Archive.7z .\Archive\* -mmt1 -mx9 -m0=LZMA:d32
-7zr a -y Archive.7z .\Archive\* -mmt1 -mx1 -m0=LZMA:d32
-
-if %errorlevel% neq 0 (
-	pause
-	exit %errorlevel%
+:compile_dictionaries
+pushd "..\..\02-Prebuilt Data"
+if not "%errorlevel%"=="0" exit /b %errorlevel%
+if not exist "Dictionaries\*.dic" goto :dictionary_missing
+call :require_file "mlsbdic.exe" || goto :dictionary_failed
+if not exist "KexDir\Globalization\Dictionaries" mkdir "KexDir\Globalization\Dictionaries"
+if not exist "KexDir\Globalization\Dictionaries" goto :dictionary_missing
+for %%F in ("KexDir\Globalization\Dictionaries\*.bdi") do (
+    if exist "%%~F" del /F /Q "%%~F"
+    if exist "%%~F" goto :dictionary_missing
 )
-
-rd /s /q Archive
-
-copy /b ..\..\KexSetup_%DBGREL%.exe + Archive.7z "..\..\KexSetup_%DBGREL%.exe" >nul
-
-if %errorlevel% neq 0 (
-	pause
-	exit %errorlevel%
+".\mlsbdic.exe" /IN:Dictionaries /OUT:KexDir\Globalization\Dictionaries
+if not "%errorlevel%"=="0" goto :dictionary_failed
+for %%F in ("Dictionaries\*.dic") do (
+    call :require_file "KexDir\Globalization\Dictionaries\%%~nF.bdi" || goto :dictionary_failed
 )
+popd
+exit /b 0
 
-del Archive.7z
+:dictionary_missing
+echo ERROR: Dictionary sources or output directory are missing or locked.
+popd
+exit /b 1
 
-REM Now auto-increment the build number, but only for debug builds.
+:dictionary_failed
+set "DICTIONARY_EXIT=%errorlevel%"
+popd
+exit /b %DICTIONARY_EXIT%
 
-if %DBGREL%==Debug (
-	"..\..\01-Development Utilities\vautogen\vautogen.exe"
+:copy_required
+call :require_file "%~1" || exit /b 1
+copy /Y "%~1" "%~2" >nul
+exit /b %errorlevel%
 
-	if %errorlevel% neq 0 (
-		pause
-		exit %errorlevel%
-	)
+:require_file
+if not exist "%~1" (
+    echo ERROR: Required file is missing: "%~1".
+    exit /b 1
 )
+if %~z1 EQU 0 (
+    echo ERROR: Required file is empty: "%~1".
+    exit /b 1
+)
+exit /b 0
+
+:stale_output
+echo ERROR: Could not remove a stale packaging file or directory.
+set "PACKAGE_EXIT=1"
+goto :failure_cleanup
+
+:failed
+set "PACKAGE_EXIT=%errorlevel%"
+goto :failure_cleanup
+
+:failed_no_push
+set "PACKAGE_EXIT=%errorlevel%"
+echo ERROR: Cannot enter the packaging directory.
+goto :report_failure
+
+:failure_cleanup
+del /F /Q "%PACKAGE_OUTPUT%" "%PACKAGE_PENDING%" Archive.7z >nul 2>nul
+if exist Archive rmdir /S /Q Archive
+popd
+
+:report_failure
+echo ERROR: Packaging failed with exit code %PACKAGE_EXIT%.
+if not defined VxKex_NEXT_NOPAUSE pause
+endlocal & exit /b %PACKAGE_EXIT%

@@ -1,43 +1,63 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal EnableExtensions DisableDelayedExpansion
 
 where MSBuild.exe >nul 2>nul
-if errorlevel 1 goto :no_msbuild
+if not "%errorlevel%"=="0" goto :no_msbuild
 
-if defined VxKex_NEXT_Platform_Toolset (
-    set "TOOLSET=!VxKex_NEXT_Platform_Toolset!"
-    echo Using platform toolset from environment: !TOOLSET!
-) else (
-    echo Select platform toolset:
-    echo 1 - Windows SDK 7.1 ^(Windows7.1SDK^)
-    echo 2 - Visual Studio 2010 ^(v100^)
-    echo 3 - Visual Studio 2012 Windows XP ^(v110_xp^)
-    echo 4 - Visual Studio 2013 Windows XP ^(v120_xp^)
-    echo 5 - Visual Studio 2015 Windows XP ^(v140_xp^)
-    set /p "choice=Enter a number and press Enter: "
-    if "!choice!"=="1" set "TOOLSET=Windows7.1SDK"
-    if "!choice!"=="2" set "TOOLSET=v100"
-    if "!choice!"=="3" set "TOOLSET=v110_xp"
-    if "!choice!"=="4" set "TOOLSET=v120_xp"
-    if "!choice!"=="5" set "TOOLSET=v140_xp"
-    if not defined TOOLSET (
-        echo Invalid choice, defaulting to v100.
-        set "TOOLSET=v100"
-    )
-)
+if defined VxKex_NEXT_Platform_Toolset goto :toolset_ready
+echo Select platform toolset:
+echo 1 - Windows SDK 7.1 ^(Windows7.1SDK^)
+echo 2 - Visual Studio 2010 ^(v100^)
+echo 3 - Visual Studio 2012 Windows XP ^(v110_xp^)
+echo 4 - Visual Studio 2013 Windows XP ^(v120_xp^)
+echo 5 - Visual Studio 2015 Windows XP ^(v140_xp^)
+set "choice="
+set /p "choice=Enter a number and press Enter: "
+if "%choice%"=="1" set "VxKex_NEXT_Platform_Toolset=Windows7.1SDK"
+if "%choice%"=="2" set "VxKex_NEXT_Platform_Toolset=v100"
+if "%choice%"=="3" set "VxKex_NEXT_Platform_Toolset=v110_xp"
+if "%choice%"=="4" set "VxKex_NEXT_Platform_Toolset=v120_xp"
+if "%choice%"=="5" set "VxKex_NEXT_Platform_Toolset=v140_xp"
+if defined VxKex_NEXT_Platform_Toolset goto :toolset_ready
+echo Invalid choice, defaulting to v100.
+set "VxKex_NEXT_Platform_Toolset=v100"
 
-timeout /t 1 /nobreak
+:toolset_ready
+echo Using platform toolset: %VxKex_NEXT_Platform_Toolset%
+
+REM Never leave an old installer looking like the result of a failed build.
+del /F /Q "%~dp0..\KexSetup_Debug.exe" >nul 2>nul
+if exist "%~dp0..\KexSetup_Debug.exe" goto :missing_output
+
 call SetEnv.Cmd /x64
-MSBuild.exe "%~dp0\..\VxKex.sln" /p:Configuration=Debug /p:Platform="x64" /p:PlatformToolset=!TOOLSET!
-timeout /t 1 /nobreak
-call SetEnv.Cmd /x86
-MSBuild.exe "%~dp0\..\VxKex.sln" /p:Configuration=Debug /p:Platform="Win32" /p:PlatformToolset=!TOOLSET!
+if not "%errorlevel%"=="0" goto :failed
+MSBuild.exe "%~dp0..\VxKex.sln" /p:Configuration=Debug /p:Platform="x64" /p:PlatformToolset=%VxKex_NEXT_Platform_Toolset%
+if not "%errorlevel%"=="0" goto :failed
 
-goto :end
+call SetEnv.Cmd /x86
+if not "%errorlevel%"=="0" goto :failed
+MSBuild.exe "%~dp0..\VxKex.sln" /p:Configuration=Debug /p:Platform="Win32" /p:PlatformToolset=%VxKex_NEXT_Platform_Toolset%
+if not "%errorlevel%"=="0" goto :failed
+
+if not exist "%~dp0..\KexSetup_Debug.exe" goto :missing_output
+for %%F in ("%~dp0..\KexSetup_Debug.exe") do if %%~zF EQU 0 goto :missing_output
+endlocal & exit /b 0
+
+:failed
+set "BUILD_EXIT=%errorlevel%"
+goto :failure_cleanup
 
 :no_msbuild
-echo Please drag this file into Visual Studio Command Prompt or Windows SDK Command Prompt and press Enter to execute.
-pause
+echo ERROR: Run this script in a Visual Studio or Windows SDK Command Prompt.
+set "BUILD_EXIT=1"
+goto :failure_cleanup
 
-:end
-endlocal
+:missing_output
+echo ERROR: Could not replace or create KexSetup_Debug.exe.
+set "BUILD_EXIT=1"
+
+:failure_cleanup
+del /F /Q "%~dp0..\KexSetup_Debug.exe" >nul 2>nul
+echo ERROR: Debug build failed with exit code %BUILD_EXIT%.
+if not defined VxKex_NEXT_NOPAUSE pause
+endlocal & exit /b %BUILD_EXIT%

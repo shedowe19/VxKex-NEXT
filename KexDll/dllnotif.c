@@ -48,7 +48,6 @@ STATIC BOOL GetDriveDevicePath(
 	NTSTATUS Status;
 	HANDLE Heap = GetProcessHeap();
 	BOOL Success = FALSE;
-	SIZE_T TargetLen;
 	WCHAR DosNameBuffer[8];
 
 	*OutDevicePath = NULL;
@@ -75,6 +74,9 @@ STATIC BOOL GetDriveDevicePath(
 	if (Status != STATUS_BUFFER_TOO_SMALL && !NT_SUCCESS(Status))
 		goto Cleanup;
 
+	if (ReturnedLength > ((USHORT) -1) - sizeof(WCHAR))
+		goto Cleanup;
+
 	TargetBuffer = (PWSTR)RtlAllocateHeap(Heap, 0, ReturnedLength + sizeof(WCHAR));
 	if (TargetBuffer == NULL)
 		goto Cleanup;
@@ -87,8 +89,12 @@ STATIC BOOL GetDriveDevicePath(
 	if (!NT_SUCCESS(Status))
 		goto Cleanup;
 
-	if (StringCchLength(TargetBuffer, STRSAFE_MAX_CCH, &TargetLen) != S_OK)
+	// NtQuerySymbolicLinkObject returns a counted string, not necessarily a
+	// null-terminated one. Terminate only inside the reserved extra character.
+	if (Target.Length % sizeof(WCHAR) != 0 ||
+		Target.Length > Target.MaximumLength - sizeof(WCHAR))
 		goto Cleanup;
+	TargetBuffer[Target.Length / sizeof(WCHAR)] = L'\0';
 
 	*OutDevicePath = TargetBuffer;
 	TargetBuffer = NULL;
@@ -111,20 +117,22 @@ STATIC BOOL DevicePathToDosPath(
 	PWSTR NewBuffer = NULL;
 	PCWSTR SrcPtr = NULL;
 	WCHAR Drive;
-	INT DriveLen = 0;
+	SIZE_T DriveLen = 0;
 	SIZE_T RemainLen = 0;
 	SIZE_T NewLen = 0;
 	INT Index;
 	BOOL Success = FALSE;
 	BOOL BestFound = FALSE;
 	WCHAR BestDrive = L'\0';
-	INT BestDriveLen = 0;
+	SIZE_T BestDriveLen = 0;
 	PWSTR Remain = NULL;
 	ULONG DevicePrefixLen = 8;	// L"\\Device\\"
 	ULONG MupPrefixLen = 12;	// L"\\Device\\Mup\\"
 	BOOL IsMup = FALSE;
 
-	if (DevicePath == NULL || DevicePath->Buffer == NULL || DevicePath->Length == 0)
+	if (DevicePath == NULL || DevicePath->Buffer == NULL || DevicePath->Length < DevicePrefixLen * sizeof(WCHAR) ||
+		DevicePath->Length > DevicePath->MaximumLength ||
+		DevicePath->Length % sizeof(WCHAR) != 0)
 		return FALSE;
 
 	SrcPtr = DevicePath->Buffer;
@@ -177,13 +185,13 @@ STATIC BOOL DevicePathToDosPath(
 		if (!GetDriveDevicePath(Drive, &DriveDevicePath))
 			continue;
 
-		if (StringCchLength(DriveDevicePath, STRSAFE_MAX_CCH, (SIZE_T*)&DriveLen) != S_OK) {
+		if (StringCchLength(DriveDevicePath, STRSAFE_MAX_CCH, &DriveLen) != S_OK) {
 			RtlFreeHeap(Heap, 0, DriveDevicePath);
 			DriveDevicePath = NULL;
 			continue;
 		}
 
-		if (DriveLen * (INT)sizeof(WCHAR) <= DevicePath->Length) {
+		if (DriveLen <= DevicePath->Length / sizeof(WCHAR)) {
 			if (_wcsnicmp(DevicePath->Buffer, DriveDevicePath, DriveLen) == 0) {
 				if (!BestFound || DriveLen > BestDriveLen) {
 					BestDrive = Drive;

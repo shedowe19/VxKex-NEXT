@@ -111,7 +111,7 @@ BOOLEAN KexCfgParseBooleanParameter(
 
 	Index = 0;
 
-	until (Parameter[Index] == ' ' || Parameter[Index] == '\0' || Index >= ARRAYSIZE(ParameterValue - 2)) {
+	until (Parameter[Index] == ' ' || Parameter[Index] == '\0' || Index >= ARRAYSIZE(ParameterValue) - 2) {
 		ParameterValue[Index] = Parameter[Index];
 		++Index;
 	}

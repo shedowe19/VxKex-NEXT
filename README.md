@@ -1,3 +1,17 @@
+# VxKex NEXT standalone maintenance
+
+This independent repository starts from upstream release **1.2.3.2465** and
+records its changes in [MAINTENANCE.md](MAINTENANCE.md). The complete source,
+binary build inputs and original author attribution are retained. The upstream
+pause notice below describes the original project.
+
+See [GitHub Actions](https://github.com/shedowe19/VxKex-NEXT/actions) for current
+build and regression-test results, and the
+[complete issue review](00-Documentation/Issue_Review_2026-10-31.txt) for the
+remaining compatibility work.
+
+## Original upstream documentation
+
 # [GitHub](https://github.com/YuZhouRen86/VxKex-NEXT) | [Gitee](https://gitee.com/YuZhouRen86/VxKex-NEXT)
 
 **This article is also avaliable in the following languages**  

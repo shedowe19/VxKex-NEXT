@@ -75,7 +75,9 @@ VOID KexCfgHandleCommandLine(
 
 	Parameter = StringFindI(CommandLine, L"/EXE:");
 	if (Parameter) {
-		BOOLEAN HasQuotes;
+		BOOLEAN HasQuotes = FALSE;
+		PCWSTR ParameterEnd;
+		SIZE_T ParameterCch;
 
 		Parameter += StringLiteralLength(L"/EXE:");
 
@@ -94,15 +96,11 @@ VOID KexCfgHandleCommandLine(
 			++Parameter;
 		}
 
-		StringCchCopy(ExeFullPathTemp, ARRAYSIZE(ExeFullPathTemp), Parameter);
-
 		if (HasQuotes) {
-			PWCHAR EndQuote;
+			// Find the matching quote before copying the argument.
+			ParameterEnd = StringFind(Parameter, L"\"");
 
-			// Find the matching quote and remove it.
-			EndQuote = (PWCHAR) StringFind(ExeFullPathTemp, L"\"");
-
-			if (!EndQuote) {
+			if (!ParameterEnd) {
 				KexCfgMessageBox(
 					NULL,
 					L"The argument to /EXE was too long or missing an end quote.",
@@ -112,16 +110,26 @@ VOID KexCfgHandleCommandLine(
 				ExitProcess(STATUS_INVALID_PARAMETER);
 			}
 
-			*EndQuote = '\0';
 		} else {
-			PWCHAR EndSpace;
-
 			// A space delimits the end of the argument.
-			EndSpace = (PWCHAR) StringFind(ExeFullPathTemp, L" ");
+			ParameterEnd = StringFind(Parameter, L" ");
+		}
 
-			if (EndSpace) {
-				*EndSpace = '\0';
-			}
+		if (!ParameterEnd) {
+			ParameterEnd = Parameter + wcslen(Parameter);
+		}
+
+		// Only copy /EXE, not the remaining options. Never accept a truncated path.
+		ParameterCch = ParameterEnd - Parameter;
+		if (ParameterCch == 0 || ParameterCch >= ARRAYSIZE(ExeFullPathTemp) ||
+			FAILED(StringCchCopyN(ExeFullPathTemp, ARRAYSIZE(ExeFullPathTemp), Parameter, ParameterCch))) {
+			KexCfgMessageBox(
+				NULL,
+				L"The argument to /EXE was empty or too long.",
+				_(FRIENDLYAPPNAME_ENG),
+				MB_ICONERROR | MB_OK);
+
+			ExitProcess(STATUS_INVALID_PARAMETER);
 		}
 
 		//
@@ -158,9 +166,19 @@ VOID KexCfgHandleCommandLine(
 		{
 			WCHAR WinDir[MAX_PATH];
 			WCHAR KexDir[MAX_PATH];
+			ULONG WinDirCch;
 
-			GetWindowsDirectory(WinDir, ARRAYSIZE(WinDir));
-			KxCfgGetKexDir(KexDir, ARRAYSIZE(KexDir));
+			WinDirCch = GetWindowsDirectory(WinDir, ARRAYSIZE(WinDir));
+			if (WinDirCch == 0 || WinDirCch >= ARRAYSIZE(WinDir) ||
+				!KxCfgGetKexDir(KexDir, ARRAYSIZE(KexDir))) {
+				KexCfgMessageBox(
+					NULL,
+					L"The Windows or VxKex installation directory could not be determined.",
+					_(FRIENDLYAPPNAME_ENG),
+					MB_ICONERROR | MB_OK);
+
+				ExitProcess(STATUS_UNSUCCESSFUL);
+			}
 
 			if ((PathIsPrefix(WinDir, ExeFullPath)
 				&& !StringEqualI(PathFindFileName(ExeFullPath), L"py.exe")
@@ -304,7 +322,7 @@ VOID KexCfgHandleCommandLine(
 		Parameter += StringLiteralLength(L"/STRONGSPOOF:");
 
 		if (StringBeginsWithI(Parameter, L"0x")) {
-			Parameter += ARRAYSIZE(L"0x");
+			Parameter += StringLiteralLength(L"0x");
 		}
 
 		if (swscanf(Parameter, L"%lx", &Value) != 1) {

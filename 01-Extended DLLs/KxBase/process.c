@@ -174,8 +174,9 @@ KXBASEAPI BOOL WINAPI GetProcessMitigationPolicy(
 
 		return TRUE;
 	} else if (MitigationPolicy == ProcessDEPPolicy) {
-		BOOLEAN Success;
+		BOOL Success;
 		PPROCESS_MITIGATION_DEP_POLICY DepPolicy;
+		ULONG DepFlags;
 		BOOL Permanent;
 
 		if (BufferCb != sizeof(PROCESS_MITIGATION_DEP_POLICY)) {
@@ -186,12 +187,17 @@ KXBASEAPI BOOL WINAPI GetProcessMitigationPolicy(
 		DepPolicy = (PPROCESS_MITIGATION_DEP_POLICY) Buffer;
 
 		Success = GetProcessDEPPolicy(
-			NtCurrentProcess(),
-			&DepPolicy->Flags.AsUlong,
+			ProcessHandle,
+			&DepFlags,
 			&Permanent);
 
-		DepPolicy->Permanent = Permanent;
-		return Success;
+		if (!Success) {
+			return FALSE;
+		}
+
+		DepPolicy->Flags.AsUlong = DepFlags;
+		DepPolicy->Permanent = !!Permanent;
+		return TRUE;
 	} else if (MitigationPolicy == ProcessSystemCallDisablePolicy) {
 		PPROCESS_MITIGATION_SYSTEM_CALL_DISABLE_POLICY SystemCallDisablePolicy;
 

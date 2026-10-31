@@ -116,8 +116,10 @@ NTSTATUS KexpAddKex3264ToDllPath(
 	NTSTATUS Status;
 	PUNICODE_STRING DllPath;
 	UNICODE_STRING NewDllPath;
+	UNICODE_STRING ShortDllPath;
 	USHORT DllPathOriginalLength;
-	ANSI_STRING LdrAddDllDirectoryName;
+	USHORT BufferLength;
+	ANSI_STRING ProcedureName;
 	NTSTATUS (NTAPI *pLdrAddDllDirectory) (PCUNICODE_STRING, PPVOID);
 
 	ASSERT (VALID_UNICODE_STRING(&KexData->Kex3264DirPath));
@@ -126,135 +128,151 @@ NTSTATUS KexpAddKex3264ToDllPath(
 	DllPath = &NtCurrentPeb()->ProcessParameters->DllPath;
 	DllPathOriginalLength = DllPath->Length;
 
-	RtlInitAnsiString(&LdrAddDllDirectoryName, "LdrAddDllDirectory");
-	Status = LdrGetProcedureAddress(KexData->SystemDllBase, &LdrAddDllDirectoryName, FALSE, (PPVOID) &pLdrAddDllDirectory);
-	
+	RtlInitAnsiString(&ProcedureName, "LdrAddDllDirectory");
+	Status = LdrGetProcedureAddress(KexData->SystemDllBase, &ProcedureName,
+		FALSE, (PPVOID) &pLdrAddDllDirectory);
+
 	if (NT_SUCCESS(Status) && DllPathOriginalLength == 0) {
 		PVOID Cookie;
-		UNICODE_STRING PathName, OriginalPath, Path;
-		SIZE_T OriginalPathLength = 0;
+		NTSTATUS (NTAPI *pLdrRemoveDllDirectory) (PVOID);
+		UNICODE_STRING PathName;
+		UNICODE_STRING OriginalPath;
+		UNICODE_STRING Path;
+		SIZE_T OriginalPathLength;
+		SIZE_T PathBufferLength;
 
+		OriginalPath.Length = 0;
+		OriginalPath.MaximumLength = 0;
+		OriginalPath.Buffer = NULL;
+		Path.Buffer = NULL;
+		OriginalPathLength = 0;
 		RtlInitUnicodeString(&PathName, L"Path");
 
-		Status = pLdrAddDllDirectory(&KexData->Kex3264DirPath, &Cookie);
-		ASSERT (NT_SUCCESS(Status));
-		
-		Status = RtlQueryEnvironmentVariable(NULL, PathName.Buffer, PathName.Length / sizeof(WCHAR), NULL, 0, &OriginalPathLength);
-		ASSERT (Status == STATUS_BUFFER_TOO_SMALL || Status == STATUS_VARIABLE_NOT_FOUND);
+		Status = RtlQueryEnvironmentVariable(NULL, PathName.Buffer,
+			PathName.Length / sizeof(WCHAR), NULL, 0, &OriginalPathLength);
+		if (Status != STATUS_VARIABLE_NOT_FOUND &&
+			Status != STATUS_BUFFER_TOO_SMALL && !NT_SUCCESS(Status)) {
+			return Status;
+		}
 
-		if (OriginalPathLength) {
-			OriginalPath.Length = 0;
-			OriginalPath.MaximumLength = (USHORT)OriginalPathLength * sizeof(WCHAR);
-			OriginalPath.Buffer = StackAlloc(WCHAR, KexRtlUnicodeStringBufferCch(&OriginalPath));
-
+		if (Status != STATUS_VARIABLE_NOT_FOUND && OriginalPathLength != 0) {
+			if (OriginalPathLength > ((USHORT) -1) / sizeof(WCHAR)) {
+				return STATUS_BUFFER_TOO_SMALL;
+			}
+			OriginalPath.MaximumLength = (USHORT) (OriginalPathLength * sizeof(WCHAR));
+			OriginalPath.Buffer = SafeAlloc(WCHAR, OriginalPathLength);
+			if (!OriginalPath.Buffer) {
+				return STATUS_NO_MEMORY;
+			}
 			Status = RtlQueryEnvironmentVariable_U(NULL, &PathName, &OriginalPath);
-			ASSERT (NT_SUCCESS(Status));
+			if (!NT_SUCCESS(Status)) {
+				goto EnvironmentExit;
+			}
 		}
 
+		// Reserve a terminator, and a separator only when PATH has contents.
+		PathBufferLength = KexData->Kex3264DirPath.Length + sizeof(WCHAR);
+		if (OriginalPath.Length != 0) {
+			PathBufferLength += OriginalPath.Length + sizeof(WCHAR);
+		}
+		if (PathBufferLength > (USHORT) -1) {
+			Status = STATUS_BUFFER_TOO_SMALL;
+			goto EnvironmentExit;
+		}
 		Path.Length = 0;
-		Path.MaximumLength = OriginalPath.Length + (KexData->Kex3264DirPath.Length + sizeof(WCHAR));
-		Path.Buffer = StackAlloc(WCHAR, KexRtlUnicodeStringBufferCch(&Path));
-
-		RtlAppendUnicodeStringToString(&Path, &KexData->Kex3264DirPath);
-		if (OriginalPathLength) {
-			RtlAppendUnicodeToString(&Path, L";");
-			RtlAppendUnicodeStringToString(&Path, &OriginalPath);
+		Path.MaximumLength = (USHORT) PathBufferLength;
+		Path.Buffer = SafeAlloc(WCHAR, PathBufferLength / sizeof(WCHAR));
+		if (!Path.Buffer) {
+			Status = STATUS_NO_MEMORY;
+			goto EnvironmentExit;
 		}
 
-		Status = RtlSetEnvironmentVariable(NULL, &PathName, &Path);
-		ASSERT (NT_SUCCESS(Status));
+		Status = RtlAppendUnicodeStringToString(&Path, &KexData->Kex3264DirPath);
+		if (!NT_SUCCESS(Status)) goto EnvironmentExit;
+		if (OriginalPath.Length != 0) {
+			Status = RtlAppendUnicodeToString(&Path, L";");
+			if (!NT_SUCCESS(Status)) goto EnvironmentExit;
+			Status = RtlAppendUnicodeStringToString(&Path, &OriginalPath);
+			if (!NT_SUCCESS(Status)) goto EnvironmentExit;
+		}
+		Status = KexRtlNullTerminateUnicodeString(&Path);
+		if (!NT_SUCCESS(Status)) goto EnvironmentExit;
 
-		return STATUS_SUCCESS;
+		// Resolve rollback before registering a directory. An environment update
+		// failure must not leave half of the search-path change installed.
+		RtlInitAnsiString(&ProcedureName, "LdrRemoveDllDirectory");
+		Status = LdrGetProcedureAddress(KexData->SystemDllBase, &ProcedureName,
+			FALSE, (PPVOID) &pLdrRemoveDllDirectory);
+		if (!NT_SUCCESS(Status)) goto EnvironmentExit;
+		Status = pLdrAddDllDirectory(&KexData->Kex3264DirPath, &Cookie);
+		if (!NT_SUCCESS(Status)) goto EnvironmentExit;
+		Status = RtlSetEnvironmentVariable(NULL, &PathName, &Path);
+		if (!NT_SUCCESS(Status)) {
+			NTSTATUS RemoveStatus;
+			RemoveStatus = pLdrRemoveDllDirectory(Cookie);
+			ASSERT (NT_SUCCESS(RemoveStatus));
+		}
+
+EnvironmentExit:
+		SafeFree(Path.Buffer);
+		SafeFree(OriginalPath.Buffer);
+		return Status;
 	}
 
-	ASSERT (VALID_UNICODE_STRING(DllPath));
-
-	//
-	// Remove any embedded nulls in the path. The presence of embedded null
-	// characters will cause issues with logging, if it's enabled, and this
-	// will result in an assertion failure on debug builds.
-	//
-
-	KexpReplaceDllPathEmbeddedNulls(DllPath);
-
-	KexLogInformationEvent(
-		L"Shrinking default loader DLL path\r\n\r\n"
-		L"The original DLL path is: \"%wZ\"\r\n"
-		L"The Kex3264Dir path is: \"%wZ\"",
-		DllPath,
-		&KexData->Kex3264DirPath);
-
-	//
-	// Convert all forward slashes in the DllPath to backslashes.
-	// At least one real world case has been observed where a user's computer
-	// had the Path environment variable contain forward slashes instead of
-	// backslashes for some reason.
-	//
-	// Without normalizing the path separators, KexpShrinkDllPathLength would
-	// fail. This would cause VxKex to not work.
-	//
-
-	KexpNormalizeDllPathBackslashes(DllPath);
-
-	//
-	// Call a helper function to shrink DllPath by *at least* the length
-	// of our prepend string.
-	//
-
-	if (DllPath->Length <= KexData->Kex3264DirPath.Length) {
-		// The DLL path is too small to add Kex3264DirPath to it.
+	if (!DllPath->Buffer || DllPath->Length > DllPath->MaximumLength ||
+		DllPath->Length % sizeof(WCHAR) != 0) {
+		return STATUS_INVALID_PARAMETER;
+	}
+	if (DllPathOriginalLength <= KexData->Kex3264DirPath.Length) {
 		return STATUS_PATH_TOO_SHORT;
 	}
+	if ((SIZE_T) DllPathOriginalLength + sizeof(WCHAR) > (USHORT) -1) {
+		return STATUS_BUFFER_TOO_SMALL;
+	}
 
-	Status = KexpShrinkDllPathLength(DllPath, DllPath->Length - (KexData->Kex3264DirPath.Length + sizeof(WCHAR)));
-	/*ASSERT (NT_SUCCESS(Status));
-	ASSERT (DllPath->Length < DllPathOriginalLength);
-	ASSERT (DllPath->Length <= DllPathOriginalLength - (KexData->Kex3264DirPath.Length + sizeof(WCHAR)));
-
-	if (!NT_SUCCESS(Status)) {
-		return Status;
-	}*/
-
-	//
-	// Create a temporary buffer to hold the new DllPath.
-	//
-
+	// Work on copies. Normalization, duplicate removal and failed appends must
+	// never modify the loader's buffer or its cached length on an error path.
+	BufferLength = DllPathOriginalLength + sizeof(WCHAR);
+	ShortDllPath.Length = 0;
+	ShortDllPath.MaximumLength = BufferLength;
+	ShortDllPath.Buffer = SafeAlloc(WCHAR, BufferLength / sizeof(WCHAR));
+	if (!ShortDllPath.Buffer) {
+		return STATUS_NO_MEMORY;
+	}
 	NewDllPath.Length = 0;
-	NewDllPath.MaximumLength = DllPath->Length + (KexData->Kex3264DirPath.Length + sizeof(WCHAR));
-	NewDllPath.Buffer = StackAlloc(WCHAR, KexRtlUnicodeStringBufferCch(&NewDllPath));
+	NewDllPath.MaximumLength = BufferLength;
+	NewDllPath.Buffer = SafeAlloc(WCHAR, BufferLength / sizeof(WCHAR));
+	if (!NewDllPath.Buffer) {
+		SafeFree(ShortDllPath.Buffer);
+		return STATUS_NO_MEMORY;
+	}
 
-	//
-	// Build the new DllPath.
-	//
+	RtlCopyUnicodeString(&ShortDllPath, DllPath);
+	KexpReplaceDllPathEmbeddedNulls(&ShortDllPath);
+	KexpNormalizeDllPathBackslashes(&ShortDllPath);
+	Status = KexpShrinkDllPathLength(&ShortDllPath,
+		DllPathOriginalLength - (KexData->Kex3264DirPath.Length + sizeof(WCHAR)));
+	if (!NT_SUCCESS(Status)) goto Exit;
 
 	Status = RtlAppendUnicodeStringToString(&NewDllPath, &KexData->Kex3264DirPath);
+	if (!NT_SUCCESS(Status)) goto Exit;
 	Status = RtlAppendUnicodeToString(&NewDllPath, L";");
-	ASSERT (NT_SUCCESS(Status));
+	if (!NT_SUCCESS(Status)) goto Exit;
+	Status = RtlAppendUnicodeStringToString(&NewDllPath, &ShortDllPath);
+	if (!NT_SUCCESS(Status)) goto Exit;
+	Status = KexpPadDllPathToOriginalLength(&NewDllPath, DllPathOriginalLength);
+	if (!NT_SUCCESS(Status)) goto Exit;
 
-	if (!NT_SUCCESS(Status)) {
-		return Status;
+	RtlCopyMemory(DllPath->Buffer, NewDllPath.Buffer, DllPathOriginalLength);
+	if (DllPath->MaximumLength - DllPathOriginalLength >= sizeof(WCHAR)) {
+		DllPath->Buffer[DllPathOriginalLength / sizeof(WCHAR)] = L'\0';
 	}
+	ASSERT (DllPath->Length == DllPathOriginalLength);
 
-	Status = RtlAppendUnicodeStringToString(&NewDllPath, DllPath);
-	ASSERT (NT_SUCCESS(Status));
-
-	if (!NT_SUCCESS(Status)) {
-		return Status;
-	}
-
-	//
-	// Copy new DllPath to old DllPath and finally pad to original length.
-	//
-	
-	RtlCopyUnicodeString(DllPath, &NewDllPath);
-
-	Status = KexpPadDllPathToOriginalLength(DllPath, DllPathOriginalLength);
-	//ASSERT (NT_SUCCESS(Status));
-
-	ASSERT (!KexRtlUnicodeStringContainsEmbeddedNull(DllPath));
-
-	//return Status;
-	return STATUS_SUCCESS;
+Exit:
+	SafeFree(NewDllPath.Buffer);
+	SafeFree(ShortDllPath.Buffer);
+	return Status;
 }
 
 //
@@ -265,174 +283,66 @@ STATIC INLINE NTSTATUS KexpShrinkDllPathLength(
 	IN	PUNICODE_STRING	DllPath,
 	IN	USHORT			TargetLength)
 {
-	NTSTATUS Status;
-	UNICODE_STRING Semicolon;
-	UNICODE_STRING DllPathAfterCurrentEntry;
+	ULONG CurrentStart;
+	ULONG PathCch;
 
-	RtlInitConstantUnicodeString(&Semicolon, L";");
-
-	//
-	// Append a semicolon to DllPath to simplify the code which removes duplicate
-	// path elements. This is always possible because of the null terminator at
-	// the end of the DllPath string.
-	//
-	// In order to maintain compatibility with any badly written code elsewhere
-	// which depends on this null terminator, we will have to remember to add the
-	// null terminator back on.
-	//
-
-	Status = RtlAppendUnicodeStringToString(DllPath, &Semicolon);
-	ASSERT (NT_SUCCESS(Status));
-
-	DllPathAfterCurrentEntry = *DllPath;
-
-	until (DllPath->Length <= TargetLength) {
+	PathCch = KexRtlUnicodeStringCch(DllPath);
+	CurrentStart = 0;
+	while (DllPath->Length > TargetLength && CurrentStart < PathCch) {
+		ULONG CurrentEnd;
+		ULONG DuplicateStart;
 		UNICODE_STRING CurrentEntry;
-		UNICODE_STRING DllPathAfterDuplicateEntry;
 
-		//
-		// Fetch a path entry.
-		//
-
-		while (RtlPrefixUnicodeString(&Semicolon, &DllPathAfterCurrentEntry, FALSE)) {
-			// Skip past semicolons.
-			KexRtlAdvanceUnicodeString(&DllPathAfterCurrentEntry, sizeof(WCHAR));
+		while (CurrentStart < PathCch && DllPath->Buffer[CurrentStart] == L';') {
+			++CurrentStart;
 		}
-
-		Status = RtlFindCharInUnicodeString(
-			0,
-			&DllPathAfterCurrentEntry,
-			&Semicolon,
-			&CurrentEntry.Length);
-
-		if (!NT_SUCCESS(Status)) {
-			return Status;
+		CurrentEnd = CurrentStart;
+		while (CurrentEnd < PathCch && DllPath->Buffer[CurrentEnd] != L';') {
+			++CurrentEnd;
 		}
-
-		// Set up CurrentPathEntry so that it contains a single path entry with no
-		// leading or trailing semicolons.
-		CurrentEntry.Buffer = DllPathAfterCurrentEntry.Buffer;
+		if (CurrentEnd == CurrentStart) break;
+		CurrentEntry.Buffer = DllPath->Buffer + CurrentStart;
+		CurrentEntry.Length = (USHORT) ((CurrentEnd - CurrentStart) * sizeof(WCHAR));
 		CurrentEntry.MaximumLength = CurrentEntry.Length;
-		CurrentEntry.Length -= sizeof(WCHAR); // it includes the semicolon - get rid of it
+		DuplicateStart = CurrentEnd;
 
-		// Set up DllPathAfterCurrentEntry so that it begins right after CurrentPathEntry.
-		KexRtlAdvanceUnicodeString(&DllPathAfterCurrentEntry, CurrentEntry.Length);
-		ASSERT (DllPathAfterCurrentEntry.Buffer == KexRtlEndOfUnicodeString(&CurrentEntry));
-
-		if (KexRtlUnicodeStringCch(&CurrentEntry) == 0) {
-			// Empty path entry. Skip past it so that the code to remove duplicates
-			// doesn't have to handle empty path entries.
-			continue;
-		}
-
-		//
-		// Find duplicates of the current path entry and remove them.
-		//
-
-		while (TRUE) {
-			UNICODE_STRING StringToSearchFor;
+		while (DllPath->Length > TargetLength && DuplicateStart < PathCch) {
+			ULONG DuplicateEnd;
 			UNICODE_STRING DuplicateEntry;
-			USHORT CchRemoved;
 
-			//
-			// Find another instance of CurrentEntry. We want the path entry to be
-			// complete, so we will search for the current entry both preceded and
-			// followed by a semicolon.
-			//
-
-			RtlInitEmptyUnicodeStringFromTeb(&StringToSearchFor);
-
-			Status = STATUS_SUCCESS;
-
-			Status |= RtlAppendUnicodeStringToString(&StringToSearchFor, &Semicolon);
-			ASSERT (NT_SUCCESS(Status));
-			
-			Status |= RtlAppendUnicodeStringToString(&StringToSearchFor, &CurrentEntry);
-			ASSERT (NT_SUCCESS(Status));
-
-			Status |= RtlAppendUnicodeStringToString(&StringToSearchFor, &Semicolon);
-			ASSERT (NT_SUCCESS(Status));
-
-			if (Status != STATUS_SUCCESS) {
-				// If any of the three appends failed (e.g. because CurrentEntry is a
-				// super long string introduced through an environment variable or
-				// something) then just skip this.
-				break;
+			while (DuplicateStart < PathCch && DllPath->Buffer[DuplicateStart] == L';') {
+				++DuplicateStart;
 			}
-
-			DuplicateEntry.Buffer = KexRtlFindUnicodeSubstring(
-				&DllPathAfterCurrentEntry,
-				&StringToSearchFor,
-				TRUE);
-
-			if (DuplicateEntry.Buffer == NULL) {
-				break;
+			DuplicateEnd = DuplicateStart;
+			while (DuplicateEnd < PathCch && DllPath->Buffer[DuplicateEnd] != L';') {
+				++DuplicateEnd;
 			}
+			DuplicateEntry.Buffer = DllPath->Buffer + DuplicateStart;
+			DuplicateEntry.Length = (USHORT) ((DuplicateEnd - DuplicateStart) * sizeof(WCHAR));
+			DuplicateEntry.MaximumLength = DuplicateEntry.Length;
+			if (RtlEqualUnicodeString(&CurrentEntry, &DuplicateEntry, TRUE)) {
+				ULONG RemovedCch;
 
-			//
-			// Set up Length and MaximumLength.
-			//
-
-			DuplicateEntry.Length = StringToSearchFor.Length - sizeof(WCHAR);
-			DuplicateEntry.MaximumLength = StringToSearchFor.Length;
-
-			Status = KexRtlSetUnicodeStringBufferEnd(
-				&DuplicateEntry,
-				KexRtlEndOfUnicodeString(DllPath));
-
-			ASSERT (NT_SUCCESS(Status));
-			ASSERT (!KexRtlUnicodeStringEndsWith(&DuplicateEntry, &Semicolon, FALSE));
-			ASSERT (DuplicateEntry.Buffer != CurrentEntry.Buffer);
-
-			//
-			// Set up DllPathAfterDuplicateEntry.6
-			//
-
-			DllPathAfterDuplicateEntry = DuplicateEntry;
-			DllPathAfterDuplicateEntry.Length = DllPathAfterDuplicateEntry.MaximumLength;
-			KexRtlAdvanceUnicodeString(&DllPathAfterDuplicateEntry, DuplicateEntry.Length);
-
-			ASSERT (DllPathAfterDuplicateEntry.Buffer == KexRtlEndOfUnicodeString(&DuplicateEntry));
-
-			//
-			// Copy DllPathAfterDuplicateEntry back on top of DuplicateEntry. This reduces
-			// the length of the DLL path, so we will first record how many characters we
-			// have shortened the DllPath string by so we can appropriately update length
-			// values.
-			//
-
-			CchRemoved = KexRtlUnicodeStringCch(&DuplicateEntry);
-
-			RtlCopyUnicodeString(&DuplicateEntry, &DllPathAfterDuplicateEntry);
-			ASSERT (DuplicateEntry.Length == DllPathAfterDuplicateEntry.Length);
-
-			DllPath->Length -= CchRemoved * sizeof(WCHAR);
-			DllPathAfterCurrentEntry.Length -= CchRemoved * sizeof(WCHAR);
-
-			// Remember that RtlCopyUnicodeString will null terminate the resulting buffer.
-			// This is just a quick debug check to make sure the length calculation wasn't
-			// fucked up somehow.
-			ASSERT (wcslen(DllPath->Buffer) == KexRtlUnicodeStringCch(DllPath));
+				// Remove the duplicate and its preceding separator. Move, rather
+				// than copy, because the source and destination overlap.
+				RemovedCch = DuplicateEnd - DuplicateStart + 1;
+				RtlMoveMemory(DllPath->Buffer + DuplicateStart - 1,
+					DllPath->Buffer + DuplicateEnd,
+					(PathCch - DuplicateEnd) * sizeof(WCHAR));
+				PathCch -= RemovedCch;
+				DllPath->Length = (USHORT) (PathCch * sizeof(WCHAR));
+				DuplicateStart -= 1;
+			} else {
+				DuplicateStart = DuplicateEnd;
+			}
 		}
+		CurrentStart = CurrentEnd;
 	}
 
-	//
-	// Remove trailing semicolon. We added one at the beginning of this function.
-	// This is so we have space to re-add the null terminator.
-	//
-
-	ASSERT (KexRtlUnicodeStringEndsWith(DllPath, &Semicolon, FALSE));
-	DllPath->Length -= sizeof(WCHAR);
-
-	//
-	// Add the null terminator (which we removed at the beginning of the function)
-	// back on to DllPath. Failure is not critical here.
-	//
-
-	Status = KexRtlNullTerminateUnicodeString(DllPath);
-	ASSERT (NT_SUCCESS(Status));
-
-	return STATUS_SUCCESS;
+	if (DllPath->Length > TargetLength) {
+		return STATUS_PATH_TOO_SHORT;
+	}
+	return KexRtlNullTerminateUnicodeString(DllPath);
 }
 
 STATIC INLINE NTSTATUS KexpPadDllPathToOriginalLength(
@@ -441,8 +351,10 @@ STATIC INLINE NTSTATUS KexpPadDllPathToOriginalLength(
 {
 	PWCHAR Pointer;
 
-	if (DllPath->Length > OriginalLength) {
-		return STATUS_INTERNAL_ERROR;
+	if (DllPath->Length > OriginalLength ||
+		OriginalLength > DllPath->MaximumLength ||
+		DllPath->MaximumLength - OriginalLength < sizeof(WCHAR)) {
+		return STATUS_BUFFER_TOO_SMALL;
 	}
 
 	//
@@ -456,7 +368,7 @@ STATIC INLINE NTSTATUS KexpPadDllPathToOriginalLength(
 		*Pointer++ = ';';
 	}
 
-	return STATUS_SUCCESS;
+	return KexRtlNullTerminateUnicodeString(DllPath);
 }
 
 //

@@ -34,24 +34,13 @@ typedef enum {
 typedef struct _KXNETP_GAI_ASYNC_CONTEXT *PKXNETP_GAI_ASYNC_CONTEXT;
 
 typedef struct _KXNETP_GAI_ASYNC_CONTEXT {
-	//
-	// Starts off at GaiWaiting.
-	// When the operation completes, times out, or gets canceled, this gets atomically
-	// set to GaiCompletionInProgress by InterlockedCompareExchange. The first thread
-	// that sets it to GaiCompletionInProgress is then responsible for signaling
-	// Overlapped->hEvent or calling the completion routine. That thread then must set
-	// it to GaiCompleted.
-	//
-	// If the thread that sets GaiCompleted is not the threadpool callback, then it must
-	// call WakeByAddressSingle to signal GetAddrInfoExWAsyncThreadpoolCallback to wake
-	// up (if it is sleeping).
-	//
-	// In that case, the threadpool callback must wait on this value using WaitOnAddress
-	// until it becomes GaiCompleted before returning (which automatically frees the
-	// structure).
-	//
-
+	VOLATILE LONG					References;
 	VOLATILE KXNETP_GAI_STATE			State;
+
+	// Protected by GaiHandleLock. CancelHandle is an opaque token, never a
+	// caller-supplied address which GetAddrInfoExCancel may dereference.
+	PKXNETP_GAI_ASYNC_CONTEXT			Next;
+	HANDLE								CancelHandle;
 
 	union {
 		struct {
@@ -65,7 +54,7 @@ typedef struct _KXNETP_GAI_ASYNC_CONTEXT {
 		UCHAR							Flags;
 	};
 
-	// Copies of information passed to Ext_GetAddrInfoExW.
+	// Copies of input data must outlive Ext_GetAddrInfoExW's stack.
 	WCHAR								Name[256];
 	WCHAR								ServiceName[256];
 	ULONG								Namespace;
@@ -75,47 +64,96 @@ typedef struct _KXNETP_GAI_ASYNC_CONTEXT {
 	TIMEVAL								Timeout;
 	LPOVERLAPPED						Overlapped;
 	LPLOOKUPSERVICE_COMPLETION_ROUTINE	CompletionRoutine OPTIONAL;
+	HANDLE								CompletionEvent OPTIONAL;
 
-	// Timer used to implement support for the Timeout parameter.
-	// Will be NULL if no timeout was supplied by the caller.
-	HANDLE								TimeoutTimer OPTIONAL;
+	// Created before submission, armed and closed only by the worker. The
+	// worker owns a reference until every timer callback has returned.
+	PTP_TIMER							TimeoutTimer OPTIONAL;
 } TYPEDEF_TYPE_NAME(KXNETP_GAI_ASYNC_CONTEXT);
 
-typedef struct {
-	// Initially points to the async context in the stack of the thread that called
-	// Ext_GetAddrInfoExW.
-	// After ThreadpoolCallbackReady is TRUE, points to the async context in the stack
-	// of the threadpool callback.
-	PKXNETP_GAI_ASYNC_CONTEXT	AsyncContext;
+STATIC SRWLOCK GaiHandleLock = SRWLOCK_INIT;
+STATIC PKXNETP_GAI_ASYNC_CONTEXT GaiHandleList;
+STATIC ULONG_PTR GaiNextHandle;
 
-	// Whether the threadpool callback has finished copying AsyncContext into its
-	// own stack.
-	VOLATILE BOOLEAN			ThreadpoolCallbackReady;
-} TYPEDEF_TYPE_NAME(KXNETP_GAI_ASYNC_HANDOFF);
+STATIC VOID GetAddrInfoExReferenceAsyncContext(
+	IN OUT	PKXNETP_GAI_ASYNC_CONTEXT AsyncContext)
+{
+	InterlockedIncrement(&AsyncContext->References);
+}
 
-//
-// Function Definitions
-//
+STATIC VOID GetAddrInfoExDereferenceAsyncContext(
+	IN OUT	PKXNETP_GAI_ASYNC_CONTEXT AsyncContext)
+{
+	if (InterlockedDecrement(&AsyncContext->References) == 0) {
+		ASSERT (AsyncContext->TimeoutTimer == NULL);
+		HeapFree(GetProcessHeap(), 0, AsyncContext);
+	}
+}
 
-//
-// Call to complete, cancel, or time out a asynchronous GetAddrInfoEx operation.
-// Returns TRUE if the operation was completed.
-// Returns FALSE if the operation was not completed due to a multithreaded race.
-//
+STATIC BOOLEAN GetAddrInfoExRegisterAsyncOperation(
+	IN OUT	PKXNETP_GAI_ASYNC_CONTEXT AsyncContext)
+{
+	// The submitting thread already holds GaiHandleLock.
+	// Never recycle a token, even after its context has been freed. A stale
+	// cancel handle must not accidentally cancel a later request (ABA).
+	// Reserve NULL and INVALID_HANDLE_VALUE. On exhaustion, fail the request.
+	if (GaiNextHandle == (ULONG_PTR) -2) {
+		return FALSE;
+	}
+
+	AsyncContext->CancelHandle = (HANDLE) ++GaiNextHandle;
+	AsyncContext->Next = GaiHandleList;
+	GaiHandleList = AsyncContext;
+
+	return TRUE;
+}
+
+STATIC VOID GetAddrInfoExUnregisterAsyncOperation(
+	IN OUT	PKXNETP_GAI_ASYNC_CONTEXT AsyncContext)
+{
+	PKXNETP_GAI_ASYNC_CONTEXT *Link;
+
+	AcquireSRWLockExclusive(&GaiHandleLock);
+
+	for (Link = &GaiHandleList; *Link; Link = &(*Link)->Next) {
+		if (*Link == AsyncContext) {
+			*Link = AsyncContext->Next;
+			AsyncContext->Next = NULL;
+			break;
+		}
+	}
+
+	ReleaseSRWLockExclusive(&GaiHandleLock);
+}
+
+STATIC PKXNETP_GAI_ASYNC_CONTEXT GetAddrInfoExLookupAsyncOperation(
+	IN	HANDLE CancelHandle)
+{
+	PKXNETP_GAI_ASYNC_CONTEXT AsyncContext;
+
+	AcquireSRWLockExclusive(&GaiHandleLock);
+
+	for (AsyncContext = GaiHandleList; AsyncContext; AsyncContext = AsyncContext->Next) {
+		if (AsyncContext->CancelHandle == CancelHandle) {
+			// Take the reference while removal/freeing is excluded by the lock.
+			GetAddrInfoExReferenceAsyncContext(AsyncContext);
+			break;
+		}
+	}
+
+	ReleaseSRWLockExclusive(&GaiHandleLock);
+	return AsyncContext;
+}
+
+// The caller of this helper must own a reference. Only the winner may touch
+// caller-owned output buffers, and it does so before notifying completion.
 STATIC BOOLEAN GetAddrInfoExCompleteAsyncOperation(
 	IN OUT	PKXNETP_GAI_ASYNC_CONTEXT	AsyncContext,
 	IN		PADDRINFOEXW				AddrInfoResult OPTIONAL,
-	IN		INT							GaiReturnCode,
-	IN		BOOLEAN						SignalThreadpoolCallback,
-	IN		BOOLEAN						SynchronousTimerDeletion)
+	IN		INT							GaiReturnCode)
 {
 	BOOL Success;
 	KXNETP_GAI_STATE OldState;
-
-	//
-	// Set state to completion in progress, unless someone else has already won the
-	// race and initiated a cancellation or timeout.
-	//
 
 	OldState = (KXNETP_GAI_STATE) InterlockedCompareExchange(
 		(VOLATILE LONG *) &AsyncContext->State,
@@ -123,90 +161,30 @@ STATIC BOOLEAN GetAddrInfoExCompleteAsyncOperation(
 		GaiWaiting);
 
 	if (OldState != GaiWaiting) {
-		// We lost.
 		return FALSE;
 	}
 
-	//
-	// We're now in charge of either calling the completion routine or signaling the
-	// event in the OVERLAPPED structure.
-	//
-
-	ASSERT (AsyncContext->State == GaiCompletionInProgress);
+	// Remove before invoking user code. Reentrant cancellation and late
+	// cancellation then fail without looking at a completed context.
+	GetAddrInfoExUnregisterAsyncOperation(AsyncContext);
 
 	*AsyncContext->AddrInfoResult = AddrInfoResult;
 	AsyncContext->Overlapped->Internal = GaiReturnCode;
 	AsyncContext->Overlapped->Pointer = AsyncContext->AddrInfoResult;
-
-	//
-	// Delete the timeout timer if there is one present.
-	// This has to be done before the completion routine is called or event is
-	// signaled.
-	// We will use a blocking delete (INVALID_HANDLE_VALUE) if the call to this
-	// function did not originate from a timer callback, to make extra sure that
-	// no timeout callback can run after we've completed the async operation.
-	//
-
-	if (AsyncContext->TimeoutTimer) {
-		ULONG RetryCount;
-
-		RetryCount = 0;
-
-RetryDeleteTimer:
-		Success = DeleteTimerQueueTimer(
-			NULL,
-			AsyncContext->TimeoutTimer,
-			SynchronousTimerDeletion ? INVALID_HANDLE_VALUE : NULL);
-
-		++RetryCount;
-
-		if (!Success) {
-			ULONG LastError;
-
-			LastError = GetLastError();
-
-			if (LastError == ERROR_IO_PENDING) {
-				// "If the error code is ERROR_IO_PENDING, it is not necessary
-				// to call this function again."
-				Success = TRUE;
-			} else {
-				if (RetryCount < 100) {
-					// "For any other error, you should retry the call."
-					goto RetryDeleteTimer;
-				}
-			}
-		}
-
-		ASSERT (Success);
-		AsyncContext->TimeoutTimer = NULL;
-	}
-
-	//
-	// Call completion routine or signal event.
-	//
 
 	if (AsyncContext->CompletionRoutine) {
 		AsyncContext->CompletionRoutine(
 			GaiReturnCode,
 			0,
 			AsyncContext->Overlapped);
-	} else if (AsyncContext->Overlapped->hEvent) {
-		Success = SetEvent(AsyncContext->Overlapped->hEvent);
-		ASSERT (Success);
 	} else {
-		NOT_REACHED;
+		Success = SetEvent(AsyncContext->CompletionEvent);
+		ASSERT (Success);
 	}
 
-	//
-	// If necessary, signal the threadpool callback so that it can return, if it
-	// was waiting.
-	//
-
-	AsyncContext->State = GaiCompleted;
-
-	if (SignalThreadpoolCallback) {
-		KexRtlWakeAddressSingle((PVOID) &AsyncContext->State);
-	}
+	// The callback may have freed OVERLAPPED and the result pointer. Do not
+	// access either after notification; the heap context has its own lifetime.
+	InterlockedExchange((VOLATILE LONG *) &AsyncContext->State, GaiCompleted);
 
 	KexLogDebugEvent(
 		L"Asynchronous GetAddrInfoEx completed (%s)\r\n\r\n"
@@ -221,221 +199,77 @@ RetryDeleteTimer:
 	return TRUE;
 }
 
-//
-// Timer callback function to time out an asynchronous GetAddrInfoExW.
-// This timer callback is called when the operation times out. If the caller did
-// not specify a timeout, this callback will never be called.
-//
 STATIC VOID CALLBACK GetAddrInfoExAsyncTimeoutCallback(
-	IN OUT	PVOID	Parameter,
-	IN		BOOLEAN	TimerOrWaitFired)
+	IN OUT	PTP_CALLBACK_INSTANCE	Instance,
+	IN OUT	PVOID					Parameter,
+	IN OUT	PTP_TIMER				Timer)
 {
-	PKXNETP_GAI_ASYNC_CONTEXT AsyncContext;
-
-	ASSERT (Parameter != NULL);
-	
-	if (TimerOrWaitFired == FALSE) {
-		return;
-	}
-
-	AsyncContext = (PKXNETP_GAI_ASYNC_CONTEXT) Parameter;
-
-	//
-	// Complete the asynchronous operation.
-	//
-	// This works even when the async operation times out before the threadpool
-	// callback runs. The threadpool callback will still end up calling GetAddrInfoEx,
-	// but the results will be discarded.
-	//
-	// We will specify that the timer deletion is not synchronous, because that would
-	// cause a deadlock.
-	//
-
+	// The worker holds the context alive until it has disarmed this timer and
+	// WaitForThreadpoolTimerCallbacks has waited for this callback to return.
 	GetAddrInfoExCompleteAsyncOperation(
-		AsyncContext,
+		(PKXNETP_GAI_ASYNC_CONTEXT) Parameter,
 		NULL,
-		WSAETIMEDOUT,
-		TRUE,
-		FALSE);
+		WSAETIMEDOUT);
 }
 
-//
-// Threadpool callback function to support *asynchronous* GetAddrInfoExW.
-//
-// This function:
-//   - copies the async context into its own stack-allocated structure
-//   - sets the async context state to GaiWaiting and use WakeByAddressSingle to let
-//     Ext_GetAddrInfoExW return
-//
-//   - calls GetAddrInfoExW (non-asynchronous)
-//   - uses InterlockedCompareExchange to see if completion (timeout or cancel) is in
-//     progress, if so, call WaitOnAddress to wait until the completion has finished
-//     and then return.
-//
-//   - sets the Overlapped->Internal to the WSA status code of the operation
-//   - sets the Overlapped->Pointer to the PPADDRINFOEXW pointer originally specified
-//     by the application
-//   - signals Overlapped->hEvent or calls CompletionRoutine in the async context
-//
-//   - returns.
-//
 STATIC VOID CALLBACK GetAddrInfoExAsyncThreadpoolCallback(
 	IN OUT	PTP_CALLBACK_INSTANCE	Instance,
 	IN OUT	PVOID					Parameter OPTIONAL)
 {
-	BOOLEAN Success;
-	KXNETP_GAI_ASYNC_CONTEXT AsyncContext;
-	PKXNETP_GAI_ASYNC_HANDOFF AsyncHandoff;
+	PKXNETP_GAI_ASYNC_CONTEXT AsyncContext;
 	PADDRINFOEXW AddrInfoResult;
 	INT GaiReturnCode;
+	BOOLEAN Success;
 
-	ASSERT (Parameter != NULL);
+	AsyncContext = (PKXNETP_GAI_ASYNC_CONTEXT) Parameter;
 
-	//
-	// Copy the async context into our stack.
-	// Change the pointer in the handoff structure to the one in our stack.
-	//
+	// Cancellation can win even before this work item starts. In that case
+	// neither the resolver nor the timer needs to be started.
+	if (InterlockedCompareExchange((VOLATILE LONG *) &AsyncContext->State,
+		GaiWaiting, GaiWaiting) == GaiWaiting) {
 
-	AsyncHandoff = (PKXNETP_GAI_ASYNC_HANDOFF) Parameter;
-	AsyncContext = *AsyncHandoff->AsyncContext;
+		if (AsyncContext->TimeoutTimer) {
+			LARGE_INTEGER DueTime;
 
-	if (KexIsDebugBuild) {
-		WCHAR NspGuidString[64];
+			DueTime.QuadPart = -((LONGLONG) AsyncContext->Timeout.tv_sec * 10000000 +
+				(LONGLONG) AsyncContext->Timeout.tv_usec * 10);
 
-		StringFromGUID2(&AsyncContext.NspGuid, NspGuidString, ARRAYSIZE(NspGuidString));
-
-		KexLogDebugEvent(
-			L"Asynchronous GetAddrInfoEx started (%s)\r\n\r\n"
-			L"&AsyncContext:      0x%p\r\n"
-			L"Name:               \"%s\"\r\n"
-			L"ServiceName:        \"%s\"\r\n"
-			L"Namespace:          %lu\r\n"
-			L"NspGuid:            %s\r\n"
-			L"HintsPresent:       %s\r\n"
-			L"Timeout:            %d seconds + %d microseconds (0,0 means no timeout)\r\n"
-			L"CompletionRoutine:  0x%p\r\n"
-			L"Overlapped->hEvent: 0x%p",
-			AsyncContext.Name,
-			&AsyncContext,
-			AsyncContext.Name,
-			AsyncContext.ServiceName,
-			AsyncContext.Namespace,
-			NspGuidString,
-			BOOLEAN_AS_STRING(AsyncContext.HintsPresent),
-			AsyncContext.Timeout.tv_sec,
-			AsyncContext.Timeout.tv_usec,
-			AsyncContext.CompletionRoutine,
-			AsyncContext.Overlapped->hEvent);
-	}
-
-	//
-	// Set up timer if required.
-	//
-
-	if (AsyncContext.TimeoutPresent) {
-		BOOL Success;
-		ULONGLONG TimeoutMs;
-
-		TimeoutMs = AsyncContext.Timeout.tv_sec * 1000ULL;
-		TimeoutMs += (AsyncContext.Timeout.tv_usec + 999ULL) / 1000ULL;
-
-		if (TimeoutMs > ULONG_MAX) {
-			// Clamp to prevent overflows.
-			TimeoutMs = ULONG_MAX;
+			SetThreadpoolTimer(AsyncContext->TimeoutTimer, (PFILETIME) &DueTime, 0, 0);
 		}
 
-		Success = CreateTimerQueueTimer(
-			&AsyncContext.TimeoutTimer,
+		AddrInfoResult = NULL;
+		GaiReturnCode = GetAddrInfoExW(
+			AsyncContext->NamePresent ? AsyncContext->Name : NULL,
+			AsyncContext->ServiceNamePresent ? AsyncContext->ServiceName : NULL,
+			AsyncContext->Namespace,
+			AsyncContext->NspGuidPresent ? &AsyncContext->NspGuid : NULL,
+			AsyncContext->HintsPresent ? &AsyncContext->Hints : NULL,
+			&AddrInfoResult,
 			NULL,
-			GetAddrInfoExAsyncTimeoutCallback,
-			&AsyncContext,
-			(ULONG) TimeoutMs,
-			0,
-			0);
+			NULL,
+			NULL,
+			NULL);
 
-		ASSERT (Success);
-	}
+		Success = GetAddrInfoExCompleteAsyncOperation(
+			AsyncContext,
+			AddrInfoResult,
+			GaiReturnCode);
 
-	//
-	// Signal the caller that we've finished copying, and it can return now.
-	//
-
-	AsyncHandoff->AsyncContext = &AsyncContext;
-	AsyncHandoff->ThreadpoolCallbackReady = TRUE;
-	KexRtlWakeAddressSingle((PVOID) &AsyncHandoff->ThreadpoolCallbackReady);
-	
-	// This pointer is no longer valid after RtlWakeByAddressSingle returns.
-	AsyncHandoff = NULL;
-
-	//
-	// Call GetAddrInfoExW in synchronous mode. This is a blocking call.
-	//
-
-	GaiReturnCode = GetAddrInfoExW(
-		AsyncContext.NamePresent ? AsyncContext.Name : NULL,
-		AsyncContext.ServiceNamePresent ? AsyncContext.ServiceName : NULL,
-		AsyncContext.Namespace,
-		AsyncContext.NspGuidPresent ? &AsyncContext.NspGuid : NULL,
-		AsyncContext.HintsPresent ? &AsyncContext.Hints : NULL,
-		&AddrInfoResult,
-		NULL,
-		NULL,
-		NULL,
-		NULL);
-
-	//
-	// Try to complete the operation.
-	//
-
-	Success = GetAddrInfoExCompleteAsyncOperation(
-		&AsyncContext,
-		AddrInfoResult,
-		GaiReturnCode,
-		FALSE,
-		TRUE);
-
-	if (!Success) {
-		KXNETP_GAI_STATE UnwantedState;
-
-		//
-		// We lost the race and another thread has cancelled or timed out the operation
-		// before us.
-		//
-		// If the GetAddrInfoExW call returned successfully, since we are not passing
-		// the returned PADDRINFOEXW to the caller, we must free it.
-		//
-
-		if (GaiReturnCode == NO_ERROR) {
+		if (!Success && GaiReturnCode == NO_ERROR) {
+			// Cancellation/timeout already completed the request. Discard the
+			// late resolver result rather than touching the caller's buffers.
 			FreeAddrInfoExW(AddrInfoResult);
-			AddrInfoResult = NULL;
-		}
-
-		//
-		// Someone else has already initiated a cancellation or timeout.
-		// We have to wait until they have completed the asynchronous operation.
-		//
-
-		UnwantedState = GaiCompletionInProgress;
-
-		until (AsyncContext.State != UnwantedState) {
-			NTSTATUS Status;
-
-			Status = KexRtlWaitOnAddress(
-				&AsyncContext.State,
-				&UnwantedState,
-				sizeof(AsyncContext.State),
-				NULL);
-
-			ASSERT (Status == STATUS_SUCCESS);
 		}
 	}
 
-	//
-	// We may now return, since the asynchronous operation has completed.
-	//
+	if (AsyncContext->TimeoutTimer) {
+		SetThreadpoolTimer(AsyncContext->TimeoutTimer, NULL, 0, 0);
+		WaitForThreadpoolTimerCallbacks(AsyncContext->TimeoutTimer, TRUE);
+		CloseThreadpoolTimer(AsyncContext->TimeoutTimer);
+		AsyncContext->TimeoutTimer = NULL;
+	}
 
-	ASSERT (AsyncContext.State == GaiCompleted);
-	return;
+	GetAddrInfoExDereferenceAsyncContext(AsyncContext);
 }
 
 //
@@ -461,7 +295,7 @@ KXNETAPI INT WSAAPI Ext_GetAddrInfoExW(
 	HRESULT Result;
 	TP_CALLBACK_ENVIRON CallbackEnvironment;
 	KXNETP_GAI_ASYNC_CONTEXT AsyncContext;
-	KXNETP_GAI_ASYNC_HANDOFF AsyncHandoff;
+	PKXNETP_GAI_ASYNC_CONTEXT HeapContext;
 
 	if (!Timeout && !Overlapped && !CompletionRoutine && !CancelHandle) {
 		// Not an asynchronous operation. No need to do anything, just call
@@ -483,7 +317,15 @@ KXNETAPI INT WSAAPI Ext_GetAddrInfoExW(
 	// Validate parameters.
 	//
 
-	ASSERT (AddrInfoResult != NULL);
+	if (CancelHandle) {
+		*CancelHandle = NULL;
+	}
+
+	if (AddrInfoResult == NULL) {
+		SetLastError(WSAEFAULT);
+		return WSAEFAULT;
+	}
+
 	*AddrInfoResult = NULL;
 
 	if (!Name && !ServiceName) {
@@ -630,68 +472,91 @@ KXNETAPI INT WSAAPI Ext_GetAddrInfoExW(
 	AsyncContext.AddrInfoResult		= AddrInfoResult;
 	AsyncContext.Overlapped			= Overlapped;
 	AsyncContext.CompletionRoutine	= CompletionRoutine;
+	AsyncContext.CompletionEvent		= Overlapped->hEvent;
+	AsyncContext.References			= 1;
 
-	//
-	// Start the threadpool callback.
-	//
+	HeapContext = (PKXNETP_GAI_ASYNC_CONTEXT) HeapAlloc(
+		GetProcessHeap(), 0, sizeof(*HeapContext));
 
-	AsyncHandoff.AsyncContext				= &AsyncContext;
-	AsyncHandoff.ThreadpoolCallbackReady	= FALSE;
+	if (HeapContext == NULL) {
+		SetLastError(WSA_NOT_ENOUGH_MEMORY);
+		return WSA_NOT_ENOUGH_MEMORY;
+	}
+
+	*HeapContext = AsyncContext;
+
+	if (HeapContext->TimeoutPresent) {
+		HeapContext->TimeoutTimer = CreateThreadpoolTimer(
+			GetAddrInfoExAsyncTimeoutCallback, HeapContext, NULL);
+
+		if (HeapContext->TimeoutTimer == NULL) {
+			GetAddrInfoExDereferenceAsyncContext(HeapContext);
+			SetLastError(WSA_NOT_ENOUGH_MEMORY);
+			return WSA_NOT_ENOUGH_MEMORY;
+		}
+	}
 
 	InitializeThreadpoolEnvironment(&CallbackEnvironment);
 	SetThreadpoolCallbackRunsLong(&CallbackEnvironment);
 
+	// Keep the setup reference until submission returns, even if the worker
+	// finishes immediately. A second reference belongs to the queued worker.
+	GetAddrInfoExReferenceAsyncContext(HeapContext);
+
+	// Publish the token and submit while holding the registry lock. A worker
+	// can run before submission returns, but completion and cancellation must
+	// acquire this lock before touching caller outputs. Thus failed submission
+	// cannot race a cancellation callback which frees the handle storage.
+	AcquireSRWLockExclusive(&GaiHandleLock);
+
+	if (CancelHandle) {
+		if (!GetAddrInfoExRegisterAsyncOperation(HeapContext)) {
+			ReleaseSRWLockExclusive(&GaiHandleLock);
+			DestroyThreadpoolEnvironment(&CallbackEnvironment);
+
+			if (HeapContext->TimeoutTimer) {
+				CloseThreadpoolTimer(HeapContext->TimeoutTimer);
+				HeapContext->TimeoutTimer = NULL;
+			}
+
+			GetAddrInfoExDereferenceAsyncContext(HeapContext);
+			GetAddrInfoExDereferenceAsyncContext(HeapContext);
+			SetLastError(WSA_NOT_ENOUGH_MEMORY);
+			return WSA_NOT_ENOUGH_MEMORY;
+		}
+
+		*CancelHandle = HeapContext->CancelHandle;
+	}
+
 	Success = TrySubmitThreadpoolCallback(
 		GetAddrInfoExAsyncThreadpoolCallback,
-		&AsyncHandoff,
+		HeapContext,
 		&CallbackEnvironment);
 
-	ASSERT (Success);
+	if (!Success && CancelHandle) {
+		// No other registry mutation can have occurred while we hold the lock.
+		ASSERT (GaiHandleList == HeapContext);
+		GaiHandleList = HeapContext->Next;
+		HeapContext->Next = NULL;
+		*CancelHandle = NULL;
+	}
+
+	ReleaseSRWLockExclusive(&GaiHandleLock);
 	DestroyThreadpoolEnvironment(&CallbackEnvironment);
 
 	if (!Success) {
+		if (HeapContext->TimeoutTimer) {
+			CloseThreadpoolTimer(HeapContext->TimeoutTimer);
+			HeapContext->TimeoutTimer = NULL;
+		}
+
+		GetAddrInfoExDereferenceAsyncContext(HeapContext); // unused worker reference
+		GetAddrInfoExDereferenceAsyncContext(HeapContext); // setup reference
 		SetLastError(WSASYSCALLFAILURE);
 		return WSASYSCALLFAILURE;
 	}
 
-	//
-	// Wait for the threadpool callback to finish copying.
-	// Do in a loop to guard against spurious wakes.
-	//
-
-	until (AsyncHandoff.ThreadpoolCallbackReady) {
-		NTSTATUS Status;
-		BOOLEAN False;
-
-		STATIC_ASSERT(sizeof(False) == sizeof(AsyncHandoff.ThreadpoolCallbackReady));
-		
-		False = FALSE;
-
-		Status = KexRtlWaitOnAddress(
-			&AsyncHandoff.ThreadpoolCallbackReady,
-			&False,
-			sizeof(AsyncHandoff.ThreadpoolCallbackReady),
-			NULL);
-
-		ASSERT (Status == STATUS_SUCCESS);
-
-		if (Status != STATUS_SUCCESS) {
-			SetLastError(WSASYSCALLFAILURE);
-			return WSASYSCALLFAILURE;
-		}
-	}
-
-	//
-	// Return the cancel handle to the caller if the caller wants it.
-	//
-
-	if (CancelHandle) {
-		// Note that AsyncContext is now pointing to the version in the threadpool
-		// callback's stack.
-		ASSERT (AsyncHandoff.AsyncContext != &AsyncContext);
-		*CancelHandle = (HANDLE) AsyncHandoff.AsyncContext;
-	}
-
+	GetAddrInfoExDereferenceAsyncContext(HeapContext);
 	SetLastError(WSA_IO_PENDING);
 	return WSA_IO_PENDING;
 }
@@ -700,27 +565,28 @@ KXNETAPI INT WSAAPI GetAddrInfoExCancel(
 	IN	PHANDLE	Handle)
 {
 	BOOLEAN Success;
+	HANDLE CancelHandle;
 	PKXNETP_GAI_ASYNC_CONTEXT AsyncContext;
 
 	if (Handle == NULL || *Handle == NULL) {
 		return WSA_INVALID_HANDLE;
 	}
 
-	AsyncContext = (PKXNETP_GAI_ASYNC_CONTEXT) *Handle;
+	CancelHandle = *Handle;
 	*Handle = NULL;
 
-	Success = GetAddrInfoExCompleteAsyncOperation(
-		AsyncContext,
-		NULL,
-		WSA_E_CANCELLED,
-		TRUE,
-		TRUE);
+	// A handle is an opaque ID. Never cast it to a pointer, even to inspect a
+	// magic value: it may be stale, unrelated, or deliberately invalid.
+	AsyncContext = GetAddrInfoExLookupAsyncOperation(CancelHandle);
 
-	if (!Success) {
+	if (AsyncContext == NULL) {
 		return WSA_INVALID_HANDLE;
 	}
 
-	return NO_ERROR;
+	Success = GetAddrInfoExCompleteAsyncOperation(AsyncContext, NULL, WSA_E_CANCELLED);
+	GetAddrInfoExDereferenceAsyncContext(AsyncContext);
+
+	return Success ? NO_ERROR : WSA_INVALID_HANDLE;
 }
 
 KXNETAPI INT WSAAPI GetAddrInfoExOverlappedResult(
