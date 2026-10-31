@@ -34,7 +34,7 @@ def main():
         test.write_text(harness, encoding='utf-8')
         executable = directory / ('mitigation_test.exe' if os.name == 'nt' else 'mitigation_test')
         if Path(compiler).stem.lower() == 'cl':
-            command = [compiler, '/nologo', '/W4', '/WX', '/TC', str(test), '/Fe:' + str(executable)]
+            command = [compiler, '/nologo', '/W4', '/WX', '/TC', str(test), '/Fe' + str(executable)]
         else:
             command = [compiler, '-std=gnu89', '-Wall', '-Wextra', '-Werror', str(test), '-o', str(executable)]
         subprocess.run(command, cwd=directory, check=True)
