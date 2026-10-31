@@ -61,6 +61,56 @@ on the real NTDLL handle with `ERROR_PROC_NOT_FOUND`, returns the existing
 `KexRtlGetDeviceFamilyInfoEnum` provider. Other modules, names, ordinals, native
 exports and native failure codes retain their existing behavior.
 
+The identity check uses the canonical `KexData->SystemDllBase` handle rather than
+resolving the NTDLL name again. A nested loader operation can have name rewriting
+enabled; a fresh name lookup must not determine whether the caller already holds
+the real NTDLL handle. The regression test models this condition. It does not
+establish that a particular Chrome call reaches it on a physical Windows 7 PC.
+
+## Online bootstrapper exit code 75044
+
+The online `ChromeSetup.exe` first installs Google Updater. In Chromium
+156.0.8078.80, exit code **75044** is `kErrorFailedToRunInstallList`
+(`kUpdaterErrorBase + 44`). Google Updater returns it when its installation work
+item list fails and is rolled back. That list includes copying updater files,
+registry writes and COM server/service registration. The wake-task registration
+is explicitly best-effort; its failure alone does not cause this return code.
+
+The message `Failed to determine physical sector size; assuming 4KiB.` is a
+separate fallback: the file writer continues using 4096-byte alignment. This
+message and the final 75044 line do not identify which installation work item
+failed. They are not enough to justify a storage, network or compatibility-API
+change.
+
+Keep the Windows 10 reporting and child-process settings described above. To
+include the installer work-item details, repeat the failing bootstrapper command
+with these additional logging switches, preserving its existing install options:
+
+```text
+--enable-logging --vmodule="*/chrome/updater/*=3,*/chrome/installer/util/*=3,*/components/winhttp/*=2,*/components/update_client/*=2"
+```
+
+The bootstrapper forwards a supplied `--vmodule` value. Its default logging
+already includes updater/component modules, but omits `chrome/installer/util`.
+Changing the logging switches enables diagnosis; it does not repair installation.
+
+Google-branded updater logs are normally located at:
+
+- Per-user installation: `%LOCALAPPDATA%\Google\GoogleUpdater\updater.log`
+- System-wide installation on x64 Windows:
+  `%ProgramFiles(x86)%\Google\GoogleUpdater\updater.log`
+
+Preserve the log immediately after reproducing the failure, including the lines
+before `item execution failed` and `Install failed, rolling back...`. If the
+install scope changed after elevation, inspect both locations. The useful input
+is the updater log, not just the metainstaller's final exit-code line. Inspect
+paths and identifiers for private information before sharing the log.
+
+The original browser inner installer used in the preceding Windows 7 experiment
+avoids this updater setup path. An online bootstrapper or an outer standalone
+package may still run Google Updater; renaming either executable does not turn it
+into the browser's inner installer. No automatic updater repair is claimed here.
+
 ## Verification and limits
 
 The preceding physical Windows 7 experiment used narrowly patched stock NEXT
@@ -95,3 +145,8 @@ Sources for the diagnosed callers and API contract:
 - [Chromium optional key attestation](https://github.com/chromium/chromium/blob/156.0.8078.80/crypto/unexportable_key_win.cc)
 - [Microsoft NCryptCreateClaim contract](https://learn.microsoft.com/en-us/windows/win32/api/ncrypt/nf-ncrypt-ncryptcreateclaim)
 - [Chromium optional Windows App Runtime installation](https://github.com/chromium/chromium/blob/156.0.8078.80/chrome/installer/setup/install_win_app_runtime.cc)
+- [Chromium updater error constants](https://github.com/chromium/chromium/blob/156.0.8078.80/chrome/updater/constants.h#L523)
+- [Chromium updater installation and rollback](https://github.com/chromium/chromium/blob/156.0.8078.80/chrome/updater/win/setup/win_setup.cc#L152)
+- [Chromium sector-size fallback](https://github.com/chromium/chromium/blob/156.0.8078.80/chrome/installer/util/unbuffered_file_writer.cc#L99)
+- [Chromium work-item failure logging](https://github.com/chromium/chromium/blob/156.0.8078.80/chrome/installer/util/work_item_list.cc)
+- [Chromium updater log path](https://github.com/chromium/chromium/blob/156.0.8078.80/chrome/updater/util/path_util.cc)

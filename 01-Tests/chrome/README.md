@@ -62,13 +62,17 @@ the actual linked result.
 
 - A missing Win7 export on the real NTDLL handle resolves the exact existing
   `KexDll!KexRtlGetDeviceFamilyInfoEnum` provider.
+- The NTDLL identity comes from the canonical `KexData->SystemDllBase` value.
+  A test double models an active nested loader redirection that would return
+  KxNt for a fresh NTDLL name lookup. The fallback must still succeed without
+  performing any NTDLL name lookup.
 - A future native implementation or any other successful native lookup wins
   immediately, with no provider/module lookup or LastError change.
 - Ordinals0,1,65535, unknown names, name case, prefixes/suffixes and native errors
   other than127 do not trigger the fallback.
-- The same name on another module, a missing NTDLL handle, a missing already
+- The same name on another module, a missing canonical NTDLL handle, a missing already
   loaded provider and a missing provider export preserve native failure behavior.
-- Additional `GetModuleHandleW` and provider `GetProcAddress` test doubles
+- The provider `GetModuleHandleW` and `GetProcAddress` test doubles
   deliberately overwrite LastError on success/failure. The wrapper must restore
   the original error127 after those checks.
 - The public GetProcAddress export must still target the tested wrapper.

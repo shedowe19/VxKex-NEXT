@@ -80,7 +80,8 @@ KXBASEAPI FARPROC WINAPI Stub_GetProcAddress(
 
 	// Keep the real NTDLL handle for Chromium's native syscall inspection.
 	// Supply only this missing procedure through the already loaded provider.
-	if (ModuleHandle == GetModuleHandleW(L"ntdll.dll")) {
+	// A nested loader call may currently redirect NTDLL name lookups to KxNt.
+	if (ModuleHandle == (HMODULE) KexData->SystemDllBase) {
 		Provider = GetModuleHandleW(L"KexDll.dll");
 
 		if (Provider) {
