@@ -330,6 +330,9 @@ KEXAPI NTSTATUS NTAPI NtCompareObjects(
 KEXAPI NTSTATUS NTAPI KexInitializePropagation(
 	VOID);
 
+KEXAPI NTSTATUS NTAPI KexUacPatchLoadedModules(VOID);
+KEXAPI PVOID NTAPI KexUacGetReplacement(PVOID NativeAddress, PCSTR ApiName);
+
 KEXAPI NTSTATUS NTAPI KexDataInitialize(
 	OUT	PPKEX_PROCESS_DATA	KexDataOut OPTIONAL);
 

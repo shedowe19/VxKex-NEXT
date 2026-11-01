@@ -674,3 +674,30 @@ CleanupExit:
 
 	return Status;
 }
+
+//
+// NCryptCreateClaim was introduced in Windows 10. Windows 7 cannot create these
+// attestation claims; report that limitation without modifying failure outputs.
+//
+
+KXCRYPAPI SECURITY_STATUS WINAPI NCryptCreateClaim(
+	IN	NCRYPT_KEY_HANDLE	SubjectKey,
+	IN	NCRYPT_KEY_HANDLE	AuthorityKey OPTIONAL,
+	IN	DWORD				ClaimType,
+	IN	NCryptBufferDesc		*ParameterList OPTIONAL,
+	OUT	PBYTE				ClaimBlob OPTIONAL,
+	IN	DWORD				ClaimBlobCb,
+	OUT	DWORD				*ResultCb,
+	IN	DWORD				Flags)
+{
+	UNREFERENCED_PARAMETER(SubjectKey);
+	UNREFERENCED_PARAMETER(AuthorityKey);
+	UNREFERENCED_PARAMETER(ClaimType);
+	UNREFERENCED_PARAMETER(ParameterList);
+	UNREFERENCED_PARAMETER(ClaimBlob);
+	UNREFERENCED_PARAMETER(ClaimBlobCb);
+	UNREFERENCED_PARAMETER(ResultCb);
+	UNREFERENCED_PARAMETER(Flags);
+
+	return NTE_NOT_SUPPORTED;
+}

@@ -36,10 +36,16 @@ forwarders for APIs missing from the target Windows version.
   in the configuration tool.
 - Add six classic Bluetooth enumeration APIs using the Windows implementation
   in `bthprops.cpl`, with tests for forwarding and failure handling.
+- Resolve Chromium's dynamic `RtlGetDeviceFamilyInfoEnum` lookup through the
+  existing provider and expose unsupported `NCryptCreateClaim` explicitly.
 - Stop builds and packaging after required-step failures, validate installer
   contents, and run automated checks for `main` and pull requests.
 
 See [MAINTENANCE.md](MAINTENANCE.md) for implementation and verification details.
+See [Chrome 156 on Windows 7](00-Documentation/Chrome_156_Windows7.md) for the
+required application settings, tested behavior and remaining limitations.
+See [service profile propagation](00-Documentation/Service_Propagation.md) for
+the additional handoff to eligible local service processes and its limits.
 The [issue review](00-Documentation/Issue_Review_2026-10-31.txt) records 455 upstream
 issues and 2,091 accessible comments, with historical fixes, workarounds and
 remaining compatibility reports separated.

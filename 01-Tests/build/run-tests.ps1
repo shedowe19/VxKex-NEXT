@@ -155,7 +155,7 @@ function New-PackageFixture {
     Write-Text (Join-Path $fixture '02-Prebuilt Data\KexDir\Certificates\ROOT.sst') 'test certificate bundle'
     Copy-Item -LiteralPath $fakeTool -Destination (Join-Path $fixture '02-Prebuilt Data\mlsbdic.exe')
     $core = @('KexDll.dll', 'KexShlEx.dll', 'KexCfg.exe', 'VxlView.exe', 'CpiwBypa.dll', 'CpiwBypaLdr.exe', 'VxKexLdr.exe')
-    $extensions = @('KxAdvapi', 'KxBase', 'KxCom', 'KxCrt', 'KxCryp', 'KxDw', 'KxDx', 'KxMi', 'KxNet', 'KxNt', 'KxSchanl', 'KxUia', 'KxUser')
+    $extensions = @('KxAdvapi', 'KxBase', 'KxCom', 'KxCrt', 'KxCryp', 'KxDw', 'KxDx', 'KxMi', 'KxNet', 'KxNt', 'KxSchanl', 'KxUac', 'KxUia', 'KxUser')
     foreach ($config in @('Debug', 'Release')) {
         foreach ($prefix in @('', 'x64\')) {
             $output = Join-Path $fixture ($prefix + $config)
@@ -169,6 +169,8 @@ function New-PackageFixture {
                 Write-Text (Join-Path $output ($name + '.dll')) ('test binary ' + $name)
                 if ($config -eq 'Debug') { Write-Text (Join-Path $output ($name + '.pdb')) 'test symbols' }
             }
+            Write-Text (Join-Path $output 'KexElevate.exe') 'test UAC companion'
+            if ($config -eq 'Debug') { Write-Text (Join-Path $output 'KexElevate.pdb') 'test UAC companion symbols' }
         }
         Write-Text (Join-Path $fixture ($config + '\KexSetup.exe')) 'test setup'
         if ($config -eq 'Debug') { Write-Text (Join-Path $fixture 'Debug\KexSetup.pdb') 'test setup symbols' }
@@ -189,6 +191,11 @@ function Assert-NoInstaller($Fixture, $Config) {
 }
 
 try {
+    $solution = [IO.File]::ReadAllText((Join-Path $repoRoot 'VxKex.sln'))
+    $setupDependencies = [regex]::Match($solution, '(?s)Project\([^\r\n]+\) = "KexSetup",[^\r\n]+\r?\n\s*ProjectSection\(ProjectDependencies\)[^\r\n]+\r?\n(.*?)EndProjectSection').Groups[1].Value
+    foreach ($dependency in @('{8A86F955-7C95-4640-8720-B1D5178A9AF0}', '{ED63265D-3DA0-44D2-BA34-BA3B8BB86F77}')) {
+        Assert-True ($setupDependencies.Contains($dependency + ' = ' + $dependency)) ('Packaging can run before UAC project ' + $dependency)
+    }
     foreach ($config in @('Debug', 'Release')) {
         $scriptPath = '01-Development Utilities\Build_' + $config + '.bat'
         foreach ($failure in @('/x64', '/x86')) {
@@ -261,13 +268,18 @@ exit /b %VX_TEST_DEBUG_EXIT%
         $result = Invoke-Batch $fixture '01-Development Utilities\7zSfx\makesfx.bat' @{} ('/' + $config)
         Assert-Equal 0 $result.ExitCode ('Complete package failed: ' + $result.Output)
         $installer = [IO.File]::ReadAllText((Join-Path $fixture ('KexSetup_' + $config + '.exe')))
-        foreach ($expected in @('Core32\KexDll.dll', 'Core64\KexDll.dll', 'Kex32\KxBase.dll', 'Kex64\KxBase.dll', 'Kex32\custom.dll', 'Kex64\custom.dll', 'Example.bdi')) {
+        foreach ($expected in @('Core32\KexDll.dll', 'Core64\KexDll.dll', 'Kex32\KxBase.dll', 'Kex64\KxBase.dll', 'Kex32\custom.dll', 'Kex64\custom.dll', 'Kex32\KxUac.dll', 'Kex64\KxUac.dll', 'Kex32\KexElevate.exe', 'Kex64\KexElevate.exe', 'Example.bdi')) {
             Assert-True ($installer.Contains($expected)) ('Installer did not contain ' + $expected)
+        }
+        if ($config -eq 'Debug') {
+            foreach ($expected in @('Kex32\KxUac.pdb', 'Kex64\KxUac.pdb', 'Kex32\KexElevate.pdb', 'Kex64\KexElevate.pdb')) {
+                Assert-True ($installer.Contains($expected)) ('Debug installer did not contain ' + $expected)
+            }
         }
         Assert-True ($result.Calls.Contains('7zr|t Archive.7z')) 'Archive integrity command was not executed'
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture '01-Development Utilities\7zSfx\Archive'))) 'Package staging directory was not removed'
     }
-    foreach ($missing in @('x64\Release\KexDll.dll', '02-Prebuilt DLLs\x86\ucrtbase.dll', '00-Documentation\Changelog.txt', '02-Prebuilt Data\KexDir\Certificates\ROOT.sst')) {
+    foreach ($missing in @('x64\Release\KexDll.dll', 'Release\KxUac.dll', 'x64\Release\KxUac.dll', 'Release\KexElevate.exe', 'x64\Release\KexElevate.exe', '02-Prebuilt DLLs\x86\ucrtbase.dll', '00-Documentation\Changelog.txt', '02-Prebuilt Data\KexDir\Certificates\ROOT.sst')) {
         $fixture = New-PackageFixture
         Remove-Item -LiteralPath (Join-Path $fixture $missing)
         Write-Text (Join-Path $fixture 'KexSetup_Release.exe') 'stale installer'
@@ -281,11 +293,14 @@ exit /b %VX_TEST_DEBUG_EXIT%
     $result = Invoke-Batch $fixture '01-Development Utilities\7zSfx\makesfx.bat' @{} '/Release'
     Assert-True ($result.ExitCode -ne 0) 'Package accepted an empty binary'
     Assert-NoInstaller $fixture 'Release'
-    $fixture = New-PackageFixture
-    Remove-Item -LiteralPath (Join-Path $fixture 'x64\Debug\KexDll.pdb')
-    $result = Invoke-Batch $fixture '01-Development Utilities\7zSfx\makesfx.bat' @{} '/Debug'
-    Assert-True ($result.ExitCode -ne 0) 'Debug package accepted missing symbols'
-    Assert-NoInstaller $fixture 'Debug'
+    foreach ($missing in @('x64\Debug\KexDll.pdb', 'Debug\KxUac.pdb', 'x64\Debug\KxUac.pdb', 'Debug\KexElevate.pdb', 'x64\Debug\KexElevate.pdb')) {
+        $fixture = New-PackageFixture
+        Remove-Item -LiteralPath (Join-Path $fixture $missing)
+        $result = Invoke-Batch $fixture '01-Development Utilities\7zSfx\makesfx.bat' @{} '/Debug'
+        Assert-True ($result.ExitCode -ne 0) ('Debug package accepted missing symbols ' + $missing)
+        Assert-NoInstaller $fixture 'Debug'
+        Assert-True (-not $result.Calls.Contains('7zr|a ')) 'Incomplete Debug package reached the archiver'
+    }
     foreach ($failure in @('dictionary', 'archive', 'archive-test', 'version', 'autogen')) {
         $fixture = New-PackageFixture
         $result = Invoke-Batch $fixture '01-Development Utilities\7zSfx\makesfx.bat' @{ VX_TEST_TOOL_FAIL = $failure; VX_TEST_CODE = '47' } '/Debug'

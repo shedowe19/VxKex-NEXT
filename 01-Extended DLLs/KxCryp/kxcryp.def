@@ -15,6 +15,7 @@ EXPORTS
 	BCryptDestroyKey							= Ext_BCryptDestroyKey
 	BCryptKeyDerivation
 	BCryptHash
+	NCryptCreateClaim @226
 
 	;; rng.c
 	ProcessPrng

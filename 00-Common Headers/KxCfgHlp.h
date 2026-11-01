@@ -93,6 +93,19 @@ KXCFGDECLSPEC BOOLEAN KxCfgSetConfiguration(
 	IN	PKXCFG_PROGRAM_CONFIGURATION	Configuration,
 	IN	HANDLE							TransactionHandle OPTIONAL);
 
+// Noninteractive service propagation. These functions never request elevation,
+// replace an existing image configuration, start a service or stop a process.
+// Created is TRUE only after a new exact-image configuration is committed.
+KXCFGDECLSPEC ULONG KXCFGAPI KxCfgTryInheritConfiguration(
+	IN PCWSTR ExeFullPath,
+	IN CONST KEX_IFEO_PARAMETERS *Parameters,
+	OUT PBOOLEAN Created);
+
+KXCFGDECLSPEC ULONG KXCFGAPI KxCfgTryInheritServiceParameters(
+	IN PCWSTR ServiceName,
+	IN CONST KEX_IFEO_PARAMETERS *Parameters,
+	OUT PBOOLEAN Created);
+
 KXCFGDECLSPEC BOOLEAN KxCfgDeleteConfiguration(
 	IN	PCWSTR	ExeFullPath,
 	IN	HANDLE	TransactionHandle OPTIONAL,

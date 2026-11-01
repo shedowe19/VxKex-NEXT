@@ -36,10 +36,13 @@ for %%F in (KexDll.dll KexShlEx.dll KexCfg.exe VxlView.exe CpiwBypa.dll CpiwBypa
     call :copy_required "..\..\%DBGREL%\%%F" "Archive\Core32\" || goto :failed
     call :copy_required "..\..\x64\%DBGREL%\%%F" "Archive\Core64\" || goto :failed
 )
-for %%F in (KxAdvapi KxBase KxCom KxCrt KxCryp KxDw KxDx KxMi KxNet KxNt KxSchanl KxUia KxUser) do (
+for %%F in (KxAdvapi KxBase KxCom KxCrt KxCryp KxDw KxDx KxMi KxNet KxNt KxSchanl KxUac KxUia KxUser) do (
     call :copy_required "..\..\%DBGREL%\%%F.dll" "Archive\Kex32\" || goto :failed
     call :copy_required "..\..\x64\%DBGREL%\%%F.dll" "Archive\Kex64\" || goto :failed
 )
+REM The same-bitness UAC companion is loaded beside KxUac, not from Core.
+call :copy_required "..\..\%DBGREL%\KexElevate.exe" "Archive\Kex32\" || goto :failed
+call :copy_required "..\..\x64\%DBGREL%\KexElevate.exe" "Archive\Kex64\" || goto :failed
 
 REM A wildcard copy alone would silently accept a missing runtime DLL.
 for %%F in (dwrw10.dll icuuc.dll mshtmlmedia.dll msvcp_win.dll ucrtbase.dll) do (
@@ -61,10 +64,12 @@ for %%F in (KexDll KexShlEx KexCfg VxlView CpiwBypa CpiwBypaLdr VxKexLdr) do (
     call :copy_required "..\..\Debug\%%F.pdb" "Archive\Core32\" || goto :failed
     call :copy_required "..\..\x64\Debug\%%F.pdb" "Archive\Core64\" || goto :failed
 )
-for %%F in (KxAdvapi KxBase KxCom KxCrt KxCryp KxDw KxDx KxMi KxNet KxNt KxSchanl KxUia KxUser) do (
+for %%F in (KxAdvapi KxBase KxCom KxCrt KxCryp KxDw KxDx KxMi KxNet KxNt KxSchanl KxUac KxUia KxUser) do (
     call :copy_required "..\..\Debug\%%F.pdb" "Archive\Kex32\" || goto :failed
     call :copy_required "..\..\x64\Debug\%%F.pdb" "Archive\Kex64\" || goto :failed
 )
+call :copy_required "..\..\Debug\KexElevate.pdb" "Archive\Kex32\" || goto :failed
+call :copy_required "..\..\x64\Debug\KexElevate.pdb" "Archive\Kex64\" || goto :failed
 
 :pack
 ".\7zr.exe" a -y Archive.7z ".\Archive\*" -mmt1 -mx1 -m0=LZMA:d32

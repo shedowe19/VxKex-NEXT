@@ -6,6 +6,8 @@
 
 EXTERN PKEX_PROCESS_DATA KexData;
 
+VOID WINAPI KxCompTryInheritServiceForClass(REFCLSID ClassId, ULONG ClassContext);
+
 KXCOMAPI HRESULT STDMETHODCALLTYPE CActivationFactory_QueryInterface(
 	IN	IActivationFactory	*This,
 	IN	REFIID				RefIID,

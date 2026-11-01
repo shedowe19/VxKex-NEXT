@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -229,6 +229,7 @@
     <ClCompile Include="glprstat.c" />
     <ClCompile Include="dllmain.c" />
     <ClCompile Include="firefoxpatch.c" />
+    <ClCompile Include="service.c" />
     <ClCompile Include="forwards.c" />
     <ClCompile Include="launcher.c" />
     <ClCompile Include="mta.c" />
@@ -249,6 +250,7 @@
     <ClInclude Include="..\..\00-Common Headers\KxCom.h" />
     <ClInclude Include="buildcfg.h" />
     <ClInclude Include="kxcomp.h" />
+    <ClInclude Include="updaterfallback.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="KxCom.rc" />
