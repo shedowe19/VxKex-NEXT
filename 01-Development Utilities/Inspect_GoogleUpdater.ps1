@@ -184,6 +184,7 @@ namespace VxKexUpdaterDiagnostics {
             int header = full ? 20 : 12;
             if (status == 0 && required >= header && required <= buffer.Length) {
                 uint nameBytes = BitConverter.ToUInt32(buffer, full ? 16 : 8);
+                report.Field(prefix + "_NAME_CB", nameBytes);
                 if ((nameBytes & 1) == 0 && nameBytes / 2 < MaxNameChars && nameBytes <= required - header) {
                     string name = null;
                     try { name = Unicode.GetString(buffer, header, (int)nameBytes); }
@@ -193,8 +194,13 @@ namespace VxKexUpdaterDiagnostics {
                         value.Valid = true;
                         if (full) {
                             uint offset = BitConverter.ToUInt32(buffer, 8), count = BitConverter.ToUInt32(buffer, 12);
-                            if (count > MaxBytes || offset > required || count > required - offset ||
-                                (count != 0 && offset < header + nameBytes)) value.Valid = false;
+                            report.Field(prefix + "_DATA_OFFSET", offset);
+                            report.Field(prefix + "_DATA_CB_RAW", count);
+                            // Empty registry data has no bytes to address. Native Windows
+                            // may return a sentinel offset; do not dereference it.
+                            if (count > MaxBytes || (count != 0 &&
+                                (offset > required || count > required - offset ||
+                                 offset < header + nameBytes))) value.Valid = false;
                             else value.Data = Slice(buffer, count == 0 ? 0 : (int)offset, (int)count);
                         }
                     }

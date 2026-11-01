@@ -168,7 +168,7 @@ try {
             } else {
                 Assert-True ($value.Contains('REG_ENUM_STATUS=0')) 'RegEnumValueW failed for bounded fixture data.'
                 Assert-True ($value.Contains('NT_FULL_STATUS=0x00000000')) 'Full native enumeration failed.'
-                Assert-True ($value.Contains('NT_FULL_VALID=TRUE')) 'Full native layout was not validated.'
+                Assert-True ($value.Contains('NT_FULL_VALID=TRUE')) ('Full native layout was not validated: ' + $value)
                 Assert-True ($value.Contains('REG_QUERY_STATUS=0')) 'RegQueryValueExW failed for bounded fixture data.'
                 Assert-True ($value.Contains('MATCH_ENUM_QUERY=TRUE')) 'Enumeration and direct-query data differ.'
                 Assert-True ($value.Contains('MATCH_FULL_QUERY=TRUE')) 'Native FullInformation and direct-query data differ.'
