@@ -27,8 +27,6 @@ namespace VxKexUpdaterDiagnosticsTest {
         static extern int RegOpenKeyExW(IntPtr parent, string path, uint options, uint access, out IntPtr key);
         [DllImport("advapi32.dll", CharSet=CharSet.Unicode, ExactSpelling=true)]
         static extern int RegSetValueExW(IntPtr key, string name, uint reserved, uint type, byte[] data, uint size);
-        [DllImport("advapi32.dll", CharSet=CharSet.Unicode, ExactSpelling=true)]
-        static extern int RegDeleteValueW(IntPtr key, string name);
         [DllImport("advapi32.dll", ExactSpelling=true)]
         static extern int RegCloseKey(IntPtr key);
         [DllImport("advapi32.dll", CharSet=CharSet.Unicode, ExactSpelling=true)]
@@ -86,14 +84,12 @@ namespace VxKexUpdaterDiagnosticsTest {
                 return String.Join("\n", entries.ToArray());
             } finally { Check(RegCloseKey(key)); }
         }
-        public static void KeepOnlyDefault(string path, uint view) {
-            IntPtr key;
-            Check(RegOpenKeyExW(HKCU, path, 0, 0x0002 | view, out key));
+        public static void CreateDefaultOnly(string path, uint view) {
+            IntPtr key; uint disposition;
+            Check(RegCreateKeyExW(HKCU, path, 0, null, 0, 0x2001f | view, IntPtr.Zero, out key, out disposition));
             try {
-                foreach (string name in new string[] { "BinaryValue", "EmptyBinary", "TooLarge" }) {
-                    int status = RegDeleteValueW(key, name);
-                    if (status != 2) Check(status);
-                }
+                byte[] text = Encoding.Unicode.GetBytes(DefaultValue() + "\0");
+                Check(RegSetValueExW(key, "", 0, 1, text, (uint)text.Length));
             } finally { Check(RegCloseKey(key)); }
         }
     }
@@ -187,11 +183,14 @@ try {
     }
     # Reproduce the caller's default-only key with exactly one WCHAR for its
     # empty value name, independently of the named-value fixture above.
-    foreach ($view in @(512, 256)) { [VxKexUpdaterDiagnosticsTest.Fixture]::KeepOnlyDefault($registryPath, $view) }
+    # Use a fresh key: Windows can retain maximum-name metadata after deletion
+    # of longer values. That history is unrelated to unnamed-value marshalling.
+    [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($testRootName)
+    foreach ($view in @(512, 256)) { [VxKexUpdaterDiagnosticsTest.Fixture]::CreateDefaultOnly($registryPath, $view) }
     $before32 = [VxKexUpdaterDiagnosticsTest.Fixture]::Snapshot($registryPath, 512)
     $before64 = [VxKexUpdaterDiagnosticsTest.Fixture]::Snapshot($registryPath, 256)
     $single = Invoke-Probe (Join-Path $tempPath 'default-only.txt') $registryPath
-    Assert-True ([regex]::Matches($single, '(?m)^REG_ENUM_NAME_IN_CCH=1\r?$').Count -eq 2) 'Default-only keys must use one WCHAR for the unnamed value.'
+    Assert-True ([regex]::Matches($single, '(?m)^REG_ENUM_NAME_IN_CCH=1\r?$').Count -eq 2) ('Default-only keys must use one WCHAR for the unnamed value: ' + $single)
     Assert-True ([regex]::Matches($single, '(?m)^MATCH_ENUM_QUERY=TRUE\r?$').Count -eq 2) 'Default-only enumeration failed to preserve the value.'
     Assert-True ($before32 -ceq [VxKexUpdaterDiagnosticsTest.Fixture]::Snapshot($registryPath, 512)) 'The default-only 32-bit key changed.'
     Assert-True ($before64 -ceq [VxKexUpdaterDiagnosticsTest.Fixture]::Snapshot($registryPath, 256)) 'The default-only 64-bit key changed.'
