@@ -80,6 +80,20 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag || github.ref }}
 
+      - name: Test updater diagnostics in x86 and x64 PowerShell
+        shell: powershell
+        run: |
+          $testScript = (Resolve-Path "01-Tests/chrome/test-updater-diagnostics.ps1").Path
+          foreach ($hostPath in @(
+            "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "$env:WINDIR\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
+          )) {
+            & $hostPath -NoProfile -ExecutionPolicy Bypass -File $testScript
+            if ($LASTEXITCODE -ne 0) {
+              throw "Updater diagnostic tests failed under $hostPath ($LASTEXITCODE)"
+            }
+          }
+
       - name: Test build and packaging failure handling
         shell: powershell
         run: '& "01-Tests/build/run-tests.ps1"'
