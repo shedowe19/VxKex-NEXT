@@ -1,5 +1,7 @@
 LIBRARY "KexDll.dll"
 EXPORTS
+	KexUacGetReplacement @114
+	KexUacPatchLoadedModules @115
 	KexDataInitialize
 	KexInitializePropagation
 	KexDllProtectedFunctionExceptionFilter
@@ -71,7 +73,7 @@ EXPORTS
 
 	KexLdrResolveDelayLoadedAPI
 
-	ApiSetQueryApiSetPresence
+	ApiSetQueryApiSetPresence @1
 
 	KexHkInstallBasicHook
 	KexHkRemoveBasicHook

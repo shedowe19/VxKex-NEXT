@@ -1,5 +1,6 @@
 ﻿#include "buildcfg.h"
 #include "vxkexldr.h"
+#include "parentguard.h"
 
 BOOLEAN VklCreateProcess(
 	IN	PCWSTR	Path,
@@ -60,7 +61,7 @@ BOOLEAN VklCreateProcess(
 
 		Status = NtOpenProcess(
 			&ParentProcessHandle,
-			PROCESS_CREATE_PROCESS,
+			PROCESS_CREATE_PROCESS | PROCESS_QUERY_LIMITED_INFORMATION,
 			&ObjectAttributes,
 			&ParentProcessClientId);
 
@@ -71,6 +72,14 @@ BOOLEAN VklCreateProcess(
 			// The NtOpenProcess call can fail if the parent process has exited.
 			//
 
+			goto NoExtendedStartupInfo;
+		}
+
+		// A borrowed parent also supplies the child's token. In particular, an
+		// elevated loader must not borrow a filtered Medium Explorer token.
+		if (!VklCanUseParentProcess(ParentProcessHandle)) {
+			SafeClose(ParentProcessHandle);
+			ParentProcessHandle = NULL;
 			goto NoExtendedStartupInfo;
 		}
 

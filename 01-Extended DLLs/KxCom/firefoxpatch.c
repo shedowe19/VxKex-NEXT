@@ -104,6 +104,8 @@ KXCOMAPI HRESULT WINAPI Ext_CoCreateInstance(
 
 	EnsureCOMInitialized();
 
+	if (!OuterUnknown) KxCompTryInheritServiceForClass(RefCLSID, ClassContext);
+
 	Result = CoCreateInstance(
 		RefCLSID,
 		OuterUnknown,
@@ -154,6 +156,8 @@ KXCOMAPI HRESULT WINAPI Ext_CoCreateInstanceEx(
 
 	EnsureCOMInitialized();
 
+	if (!OuterUnknown && !ServerInfo) KxCompTryInheritServiceForClass(RefCLSID, ClassContext);
+
 	Result = CoCreateInstanceEx(
 		RefCLSID,
 		OuterUnknown,
@@ -175,6 +179,8 @@ KXCOMAPI HRESULT WINAPI Ext_CoGetClassObject(
 	HRESULT Result;
 
 	EnsureCOMInitialized();
+
+	if (!ServerInfo) KxCompTryInheritServiceForClass(RefCLSID, ClassContext);
 
 	Result = CoGetClassObject(
 		RefCLSID,

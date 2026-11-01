@@ -61,6 +61,8 @@ KXBASEAPI FARPROC WINAPI Stub_GetProcAddress(
 		ProcedureName);
 
 	if (Procedure) {
+		PVOID Replacement = KexUacGetReplacement((PVOID) Procedure, ProcedureName);
+		if (Replacement) return (FARPROC) Replacement;
 		return Procedure;
 	}
 

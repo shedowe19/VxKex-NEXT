@@ -48,6 +48,7 @@
 #define KexLogInformationEvent MockLog
 #define KexLogEvent MockLogEvent
 #define EnsureCOMInitialized MockEnsureCOMInitialized
+#define KxCompTryInheritServiceForClass MockServiceInheritance
 #define StringFromCLSID MockGuidString
 #define StringFromIID MockGuidString
 #define CoTaskMemFree MockCoTaskMemFree
@@ -336,6 +337,10 @@ static void MockLog(PCWSTR format, ...)
 }
 static void MockLogEvent(int severity, PCWSTR format, ...) { (void)severity; (void)format; }
 static void MockEnsureCOMInitialized(void) { ++Initialized; }
+static void MockServiceInheritance(REFCLSID ClassId, ULONG Context)
+{
+    (void) ClassId; (void) Context;
+}
 static HRESULT WINAPI MockGuidString(const CLSID *guid, LPOLESTR *text) { (void)guid; *text = NULL; return E_FAIL; }
 static void WINAPI MockCoTaskMemFree(PVOID memory) { (void)memory; }
 

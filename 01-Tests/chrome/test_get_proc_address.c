@@ -59,7 +59,27 @@ static HMODULE WINAPI MockGetModuleHandleW(const wchar_t *name)
 static ULONG WINAPI MockGetLastError(void) { return LastError; }
 static void WINAPI MockSetLastError(ULONG error) { LastError = error; }
 
+/* This suite isolates the existing NTDLL fallback. UAC routing has its own
+ * production-function suite; an unavailable route must preserve native success. */
+static PVOID KexUacGetReplacement(PVOID native_address, PCSTR name)
+{
+    union { FARPROC function; PVOID address; } native;
+    native.function = NativeResult;
+    assert(native_address == native.address);
+    assert(name == ExpectedName);
+    return NULL;
+}
+
+/* The real Win32 export router deliberately passes pointer-sized native code
+ * addresses through PVOID. Keep all other /W4 diagnostics enabled. */
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4054 4055)
+#endif
 /* PRODUCTION_FUNCTION */
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 static void Reset(HMODULE module, PCSTR name)
 {

@@ -1,0 +1,31 @@
+LIBRARY KxAdvapi
+EXPORTS
+	;; service.c - preserve native SCM results while preparing local service images
+	OpenSCManagerA = Ext_OpenSCManagerA @1517
+	OpenSCManagerW = Ext_OpenSCManagerW @1518
+	OpenServiceA = Ext_OpenServiceA @1519
+	OpenServiceW = Ext_OpenServiceW @1520
+	CreateServiceA = Ext_CreateServiceA @1129
+	CreateServiceW = Ext_CreateServiceW @1130
+	CloseServiceHandle = Ext_CloseServiceHandle @1088
+	StartServiceA = Ext_StartServiceA @1720
+	StartServiceW = Ext_StartServiceW @1723
+	;; Forwarders to KexDll
+	EventSetInformation			= KexDll.KexEtwEventSetInformation
+
+	;; Forwarders to KxBase
+	CreateWellKnownSid			= KxBase.CreateWellKnownSid
+
+	;; time.c
+	EnumDynamicTimeZoneInformation
+	GetDynamicTimeZoneInformationEffectiveYears
+
+	;; token.c
+	OpenProcessToken			= Ext_OpenProcessToken
+
+	;; reggval.c
+	RegGetValueA				= Ext_RegGetValueA
+	RegGetValueW				= Ext_RegGetValueW
+
+	;; regqval.c
+	RegQueryValueExW			= Ext_RegQueryValueExW

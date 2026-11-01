@@ -342,6 +342,14 @@ KXBASEAPI HMODULE WINAPI Ext_LoadLibraryExW(
 		}
 	}
 	InterceptedKernelBaseLoaderCallReturn(ReEntrant);
+	{
+		ULONG SavedError = GetLastError();
+		if (ModuleHandle && !ReEntrant &&
+			!(Flags & (LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE | LOAD_LIBRARY_AS_IMAGE_RESOURCE))) {
+			KexUacPatchLoadedModules();
+		}
+		SetLastError(SavedError);
+	}
 
 	return ModuleHandle;
 }

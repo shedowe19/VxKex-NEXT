@@ -20,6 +20,12 @@ if errorlevel 1 exit /b 1
 python "$testRoot\winhttp\run-tests.py" --compiler cl
 if errorlevel 1 exit /b 1
 python "$testRoot\updater-com\run-tests.py" --compiler cl
+if errorlevel 1 exit /b 1
+python "$testRoot\services\run-tests.py" --compiler cl
+if errorlevel 1 exit /b 1
+python "$testRoot\uac\run-tests.py" --compiler cl
+if errorlevel 1 exit /b 1
+python "$testRoot\loader-elevation\run-tests.py" --compiler cl
 exit /b %errorlevel%
 "@ | Set-Content -LiteralPath $runner -Encoding ASCII
     try {

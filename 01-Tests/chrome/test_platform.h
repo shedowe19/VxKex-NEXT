@@ -17,6 +17,7 @@ typedef ptrdiff_t INT_PTR;
 typedef char CHAR;
 typedef const char *PCSTR;
 typedef void *HMODULE;
+typedef void *PVOID;
 typedef unsigned char BYTE;
 typedef BYTE *PBYTE;
 typedef int SECURITY_STATUS;
