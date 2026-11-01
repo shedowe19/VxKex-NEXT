@@ -198,16 +198,89 @@ KXBASEAPI BOOL WINAPI Ext_GetModuleHandleExW(
 	return Success;
 }
 
+STATIC HMODULE BasepLoadLibraryExW(
+	IN	PCWSTR	FileName,
+	IN	HANDLE	FileHandle,
+	IN	ULONG	Flags,
+	IN	PCVOID	Caller);
+
+STATIC BOOLEAN BasepIsNativeSchannelLoad(
+	IN	PCWSTR	FileName,
+	IN	PCVOID	Caller)
+{
+	UNICODE_STRING DllPath;
+	UNICODE_STRING DllBaseName;
+	UNICODE_STRING SchannelName;
+	UNICODE_STRING SchannelNameWithoutExtension;
+	NTSTATUS Status;
+
+	if (!FileName || !Caller ||
+		!AshModuleBaseNameIs(Caller, L"sspicli.dll") ||
+		!AshModuleIsWindowsModule((PVOID) Caller)) {
+		return FALSE;
+	}
+
+	RtlInitUnicodeString(&DllPath, FileName);
+	Status = KexRtlPathFindFileName(&DllPath, &DllBaseName);
+	if (!NT_SUCCESS(Status)) {
+		return FALSE;
+	}
+
+	RtlInitConstantUnicodeString(&SchannelName, L"schannel.dll");
+	RtlInitConstantUnicodeString(&SchannelNameWithoutExtension, L"schannel");
+	if (!RtlEqualUnicodeString(&DllBaseName, &SchannelName, TRUE) &&
+		!RtlEqualUnicodeString(&DllBaseName, &SchannelNameWithoutExtension, TRUE)) {
+		return FALSE;
+	}
+
+	if (DllBaseName.Buffer != DllPath.Buffer) {
+		// Match only the Windows-path form which the ordinary rewrite can
+		// replace. Preserve explicit application or third-party DLL paths.
+		if (!RtlPrefixUnicodeString(&KexData->WinDir, &DllPath, TRUE) ||
+			DllPath.Length <= KexData->WinDir.Length ||
+			DllPath.Buffer[KexData->WinDir.Length / sizeof(WCHAR)] != L'\\') {
+			return FALSE;
+		}
+	}
+
+	return TRUE;
+}
+
+STATIC HMODULE BasepLoadLibraryExA(
+	IN	PCSTR	FileName,
+	IN	HANDLE	FileHandle,
+	IN	ULONG	Flags,
+	IN	PCVOID	Caller)
+{
+	HMODULE ModuleHandle;
+	PWSTR FileName_U;
+	ULONG SavedError;
+
+	SavedError = GetLastError();
+	FileName_U = CopyPcstrToPwstr(FileName);
+	SetLastError(SavedError);
+	if (FileName_U) {
+		ModuleHandle = BasepLoadLibraryExW(FileName_U, FileHandle, Flags, Caller);
+		SavedError = GetLastError();
+		SafeFree(FileName_U);
+		SetLastError(SavedError);
+	} else {
+		ModuleHandle = LoadLibraryExA(FileName, FileHandle, Flags);
+	}
+
+	return ModuleHandle;
+}
+
 KXBASEAPI HMODULE WINAPI Ext_LoadLibraryA(
 	IN	PCSTR	FileName)
 {
-	return Ext_LoadLibraryExA(FileName, NULL, 0);
+	return BasepLoadLibraryExA(FileName, NULL, 0, ReturnAddress());
 }
 
 KXBASEAPI HMODULE WINAPI Ext_LoadLibraryW(
 	IN	PCWSTR	FileName)
 {
-	return Ext_LoadLibraryExW(FileName, NULL, 0);
+	return BasepLoadLibraryExW(FileName, NULL, 0, ReturnAddress());
 }
 
 KXBASEAPI HMODULE WINAPI Ext_LoadLibraryExA(
@@ -215,15 +288,7 @@ KXBASEAPI HMODULE WINAPI Ext_LoadLibraryExA(
 	IN	HANDLE	FileHandle,
 	IN	ULONG	Flags)
 {
-	HMODULE ModuleHandle;
-	PWSTR FileName_U = CopyPcstrToPwstr(FileName);
-	if (FileName_U) {
-		ModuleHandle = Ext_LoadLibraryExW(FileName_U, FileHandle, Flags);
-		SafeFree(FileName_U);
-	} else {
-		ModuleHandle = LoadLibraryExA(FileName, FileHandle, Flags);
-	}
-	return ModuleHandle;
+	return BasepLoadLibraryExA(FileName, FileHandle, Flags, ReturnAddress());
 }
 
 KXBASEAPI HMODULE WINAPI Ext_LoadLibraryExW(
@@ -231,10 +296,44 @@ KXBASEAPI HMODULE WINAPI Ext_LoadLibraryExW(
 	IN	HANDLE	FileHandle,
 	IN	ULONG	Flags)
 {
+	return BasepLoadLibraryExW(FileName, FileHandle, Flags, ReturnAddress());
+}
+
+STATIC HMODULE BasepLoadLibraryExW(
+	IN	PCWSTR	FileName,
+	IN	HANDLE	FileHandle,
+	IN	ULONG	Flags,
+	IN	PCVOID	Caller)
+{
 	HMODULE ModuleHandle;
 	BOOLEAN ReEntrant;
+	ULONG SavedError;
 	DWORD LoadLibrarySearchMarks = 0xFFFFFF00ul;
 	STATIC BOOL (WINAPI *SetDefaultDllDirectories) (ULONG) = NULL;
+
+	SavedError = GetLastError();
+	if (BasepIsNativeSchannelLoad(FileName, Caller)) {
+		// SSPICLI loads Schannel as an SSP and requires SpUserModeInitialize.
+		// The general schannel -> KxCryp redirect instead supplies secur32 APIs
+		// for other callers (for example WinInet). Keep that redirect intact,
+		// but load the native provider for this exact SSPICLI operation.
+		ReEntrant = NtCurrentTeb()->KexLdrShouldRewriteDll;
+		NtCurrentTeb()->KexLdrShouldRewriteDll = FALSE;
+		SetLastError(SavedError);
+		try {
+			ModuleHandle = LoadLibraryExW(FileName, FileHandle, Flags);
+			SavedError = GetLastError();
+		} finally {
+			NtCurrentTeb()->KexLdrShouldRewriteDll = ReEntrant;
+		}
+		if (ModuleHandle && !ReEntrant &&
+			!(Flags & (LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE | LOAD_LIBRARY_AS_IMAGE_RESOURCE))) {
+			KexUacPatchLoadedModules();
+		}
+		SetLastError(SavedError);
+		return ModuleHandle;
+	}
+	SetLastError(SavedError);
 
 	//
 	// This is used to fix a bug in GDI+ which caused GdipCreateFontFromLogfontA/W
@@ -265,7 +364,7 @@ KXBASEAPI HMODULE WINAPI Ext_LoadLibraryExW(
 	//
 
 	if (Flags & LOAD_WITH_ALTERED_SEARCH_PATH) {
-		if (AshModuleBaseNameIs(ReturnAddress(), L"GdiPlus.dll") &&
+		if (AshModuleBaseNameIs(Caller, L"GdiPlus.dll") &&
 			StringEqualI(FileName, L"API-MS-Win-Core-LocalRegistry-L1-1-0.dll")) {
 			Flags &= ~LOAD_WITH_ALTERED_SEARCH_PATH;
 		}
