@@ -1,7 +1,8 @@
 # Chrome 156 on Windows 7
 
-The fixes in this change address two observed failures of the original Google
-Chrome x64 156.0.8078.80 binaries on Windows 7 SP1 x64 with VxKex NEXT 1.2.3.2465.
+The fixes in this change address observed failures of the original Google
+Chrome x64 156.0.8078.80 binaries and Google Updater 157.0.8089.0 on Windows 7
+SP1 x64 with VxKex NEXT 1.2.3.2465.
 They do not modify Chrome or Windows system binaries.
 
 ## Configure the installer and browser
@@ -17,8 +18,10 @@ Use the VxKex NEXT loader when the executable cannot be started directly:
 "C:\Program Files\VxKex\VxKexLdr.exe" "<path to the original Google mini-installer>" --do-not-launch-chrome
 ```
 
-For an existing system-wide Chrome installation, run the installer elevated and
-add `--system-level`. A per-user install conflicts with a system-wide install;
+For Chrome's inner installer, an existing system-wide installation requires an
+elevated system-level run with `--system-level`. The restricted online-updater
+fallback below covers per-user activation, not the system service path.
+A per-user install conflicts with a system-wide install;
 the original installer can launch the existing browser when that conflict occurs,
 even when `--do-not-launch-chrome` was supplied. That launch is not evidence that
 the new version was installed.
@@ -109,7 +112,72 @@ paths and identifiers for private information before sharing the log.
 The original browser inner installer used in the preceding Windows 7 experiment
 avoids this updater setup path. An online bootstrapper or an outer standalone
 package may still run Google Updater; renaming either executable does not turn it
-into the browser's inner installer. No automatic updater repair is claimed here.
+into the browser's inner installer.
+
+### WOW64 propagation and registry error 317
+
+The failing updater's registry backup returned `ERROR_MR_MID_NOT_FOUND` (317).
+The cause was a damaged native function in propagated 32-bit processes:
+cleanup restored a 27-byte `NtOpenKey` stub into a 24-byte slot, replacing
+the start of `NtEnumerateValueKey` with `RET 12`. The six-argument function then
+returned a stale status and left its caller's stack unbalanced. A directly
+VxKex-enabled process did not have the damaged bytes.
+
+The legacy stub now uses the 24-byte XOR sequence. Cleanup protects the entire
+selected template, restores and flushes it before releasing the hook allocation,
+and retains that allocation when protection or cache restoration fails. Tests
+check the adjacent function, page-crossing protection and failure ordering.
+
+### Per-user COM activation error 193
+
+The updater can install its files and COM registrations but then receive
+`0x800700C1` when activating its local server. Windows 7's creator rejects the
+server image before the target's VxKex initialization runs. Starting that same
+server from an initialized VxKex process allowed genuine COM activation.
+
+KxCom has a restricted fallback for the two observed per-user Google Updater
+157.0.8089.0 classes. It runs only after native activation returns that exact
+error, for a medium-integrity, non-impersonating local caller without aggregation.
+The registered executable and arguments must match the user's local updater,
+and that exact updater path must have VxKex enabled with Windows 10 reporting,
+child propagation and application-specific handling enabled, and no strong spoof.
+Enable this configuration for
+`%LOCALAPPDATA%\Google\GoogleUpdater\157.0.8089.0\updater.exe`
+as well as the original bootstrapper. Inherited child settings alone do not
+satisfy the explicit target-configuration check.
+
+The fallback checks registration redirections and the canonical file path,
+starts the original command from the initialized caller, then retries native
+COM activation. Only a real returned COM object counts as success. It does not
+change COM registrations, elevate, or patch RPCSS. Other versions, system-level
+updater services, other classes and other HRESULTs retain native behavior.
+
+### WinHTTP automatic-proxy errors 87 and 6
+
+The updater requests `WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY` (4), which native
+Windows 7 WinHTTP rejects with `ERROR_INVALID_PARAMETER` (87). The updater's
+subsequent update check can report `0x80070006` for the missing session handle.
+
+KxNet first tries the original native call. Only after error 87 for that access
+type, null proxy arguments and flags zero or `WINHTTP_FLAG_ASYNC`, it checks both
+the user's IE proxy settings and the machine WinHTTP settings. If both explicitly
+describe a direct connection without static proxy, PAC or WPAD, it opens a real
+native `NO_PROXY` session with the other arguments preserved. Query/cleanup
+failures or configured proxies retain the original error. TLS, authentication
+and proxy settings are not changed.
+
+This is a direct-connection fallback, not full automatic-proxy emulation. Changes
+to proxy settings after session creation are not tracked.
+
+### Existing system-wide installation: status 3
+
+After the compatibility corrections, the original online bootstrapper downloaded
+190,019,048 bytes, unpacked the original Chrome 156 installer and reached its
+normal installation checks. That per-user attempt found the same Chrome version
+already installed system-wide and returned `EXISTING_VERSION_LAUNCHED` (3).
+This is an installation-scope conflict and existing-version selection, not Win32
+`ERROR_PATH_NOT_FOUND`. It does not establish a new successful installation or
+bootstrapper exit zero. The per-user COM fallback does not cover system services.
 
 ## Verification and limits
 
@@ -121,10 +189,20 @@ page. All 264 installed browser payload files matched the original Google
 payload. Those results establish the observed fixes; they must not be presented
 as a runtime test of every newly compiled source build in this repository.
 
-The source regression suite compiles and executes the changed C functions:
+The later physical Windows 7 run with the scoped development builds confirmed
+correct propagation bytes and registry results, genuine COM objects and updater
+RPC methods, successful HTTPS metadata responses, and the complete download
+described above. The final installer selected the existing system-wide version.
+These are observations of those development builds; they do not substitute for
+running the final published build on every supported configuration.
+
+The source regression suites compile and execute the changed C functions:
 
 ```sh
 python3 01-Tests/chrome/run-tests.py
+python3 01-Tests/propagation/run-tests.py
+python3 01-Tests/updater-com/run-tests.py
+python3 01-Tests/winhttp/run-tests.py
 ```
 
 The aggregate Windows runner also executes these contracts with the Windows 7.1
@@ -133,11 +211,10 @@ implementation taking precedence, wrong modules, ordinal calls, missing provider
 handling, error preservation, the eight-argument claim ABI and unchanged failure
 outputs with memory canaries.
 
-Automatic GoogleUpdater operation, long-duration stability, hardware video,
+Unattended updater operation across version changes, system-level updater
+services, proxy/PAC/WPAD emulation, long-duration stability, hardware video,
 GPU acceleration, DRM and arbitrary Windows 11 application compatibility are not
-established by these checks. The online `ChromeSetup.exe` bootstrapper can fail
-inside GoogleUpdater before it reaches the browser's original inner installer;
-that separate updater path is not repaired by this change.
+established by these checks.
 
 Sources for the diagnosed callers and API contract:
 

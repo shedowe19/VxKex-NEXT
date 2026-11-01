@@ -233,158 +233,129 @@ STATIC VOID KexpCleanupPropagationRemains(
 	VOID)
 {
 	NTSTATUS Status;
+	NTSTATUS FlushStatus;
 	PBYTE Function;
 	PVOID HookDestination;
+	PBYTE SyscallTemplate;
+	SIZE_T SyscallTemplateSize;
+	ULONG OldProtect;
+	PVOID BaseAddress;
+	SIZE_T RegionSize;
+	BYTE Native64Template[] = {
+		0x4C, 0x8B, 0xD1,                         // mov r10, rcx
+		0xB8, 0x0F, 0x00, 0x00, 0x00,             // mov eax, 0x0F
+		0x0F, 0x05,                               // syscall
+		0xC3                                      // ret
+	};
+	BYTE Wow64ModernTemplate[] = {
+		0xB8, 0x0F, 0x00, 0x00, 0x00,             // mov eax, 0x0F
+		0x64, 0xFF, 0x15, 0xC0, 0x00, 0x00, 0x00, // call fs:[0xC0]
+		0xC2, 0x0C, 0x00                          // ret 12
+	};
+	BYTE Wow64LegacyTemplate[] = {
+		0xB8, 0x0F, 0x00, 0x00, 0x00,             // mov eax, 0x0F
+		0x31, 0xC9,                               // xor ecx, ecx
+		0x8D, 0x54, 0x24, 0x04,                   // lea edx, [esp+4]
+		0x64, 0xFF, 0x15, 0xC0, 0x00, 0x00, 0x00, // call fs:[0xC0]
+		0x83, 0xC4, 0x04,                         // add esp, 4
+		0xC2, 0x0C, 0x00                          // ret 12
+	};
+	BYTE Native32Template[] = {
+		0xB8, 0xB6, 0x00, 0x00, 0x00,             // mov eax, 0xB6
+		0x8D, 0x54, 0x24, 0x04,                   // lea edx, [esp+4]
+		0xCD, 0x2E,                               // int 0x2E
+		0xC2, 0x0C, 0x00                          // ret 12
+	};
 
 	unless (KexData->Flags & KEXDATA_FLAG_PROPAGATED) {
 		KexLogDebugEvent(L"Propagation flag not set.");
 		return;
 	}
 
-	//
-	// Inspect the entry points of the native NtOpenKey and see if they
-	// look like a hook template that has previously been written.
-	//
-
 	Function = (PBYTE) NtOpenKey;
 	HookDestination = NULL;
-
 	if (KexRtlCurrentProcessBitness() == 64) {
-		//
-		// Look for 0xFF 0x25 0x00 0x00 0x00 0x00, followed by 8 byte address
-		//
-
 		if (Function[0] == 0xFF && Function[1] == 0x25 && *((PULONG) &Function[2]) == 0) {
 			HookDestination = (PVOID) *((PULONGLONG) &Function[6]);
 		}
+		Native64Template[4] = (BYTE) SSN_NtOpenKey;
+		SyscallTemplate = Native64Template;
+		SyscallTemplateSize = sizeof(Native64Template);
 	} else {
-		//
-		// Look for 0x68, followed by 4 byte address and then 0xC3
-		//
-
 		if (Function[0] == 0x68 && Function[5] == 0xC3) {
 			HookDestination = (PVOID) *((PULONG) &Function[1]);
+		}
+		if (KexRtlOperatingSystemBitness() == 64) {
+			if (LOWORD(OriginalBuildNumber) >= 8102) {
+				Wow64ModernTemplate[1] = (BYTE) SSN_NtOpenKey;
+				SyscallTemplate = Wow64ModernTemplate;
+				SyscallTemplateSize = sizeof(Wow64ModernTemplate);
+			} else {
+				// The native Win7 WOW64 stub occupies 24 bytes. A 5-byte
+				// mov ecx,0 here would overwrite the following syscall stub.
+				Wow64LegacyTemplate[1] = (BYTE) SSN_NtOpenKey;
+				SyscallTemplate = Wow64LegacyTemplate;
+				SyscallTemplateSize = sizeof(Wow64LegacyTemplate);
+			}
+		} else {
+			Native32Template[1] = (BYTE) SSN_NtOpenKey;
+			SyscallTemplate = Native32Template;
+			SyscallTemplateSize = sizeof(Native32Template);
 		}
 	}
 
 	if (!HookDestination) {
 		KexLogWarningEvent(L"Propagation flag set, but no propagation remains found.");
 		return;
+	}
+
+	// Keep the hook allocation alive until all callers see the restored code.
+	// Protect the complete selected template, including a possible page crossing.
+	BaseAddress = NtOpenKey;
+	RegionSize = SyscallTemplateSize;
+	Status = NtProtectVirtualMemory(
+		NtCurrentProcess(), &BaseAddress, &RegionSize,
+		PAGE_EXECUTE_WRITECOPY, &OldProtect);
+	ASSERT (NT_SUCCESS(Status));
+	if (!NT_SUCCESS(Status)) {
+		KexLogWarningEvent(
+			L"Failed to make NtOpenKey writable; keeping propagation hook mapped.\r\n"
+			L"NTSTATUS error code: %s (0x%08lx)",
+			KexRtlNtStatusToString(Status), Status);
+		return;
+	}
+
+	RtlCopyMemory(NtOpenKey, SyscallTemplate, SyscallTemplateSize);
+	FlushStatus = NtFlushInstructionCache(NtCurrentProcess(), NtOpenKey, SyscallTemplateSize);
+	ASSERT (NT_SUCCESS(FlushStatus));
+	Status = NtProtectVirtualMemory(
+		NtCurrentProcess(), &BaseAddress, &RegionSize, OldProtect, &OldProtect);
+	ASSERT (NT_SUCCESS(Status));
+	if (!NT_SUCCESS(FlushStatus) || !NT_SUCCESS(Status)) {
+		KexLogWarningEvent(
+			L"NtOpenKey restoration did not finish; keeping propagation hook mapped.\r\n"
+			L"Instruction cache status: %s (0x%08lx)\r\n"
+			L"Protection restore status: %s (0x%08lx)",
+			KexRtlNtStatusToString(FlushStatus), FlushStatus,
+			KexRtlNtStatusToString(Status), Status);
+		return;
+	}
+
+	// MEM_RELEASE requires a zero region size for the complete allocation.
+	BaseAddress = HookDestination;
+	RegionSize = 0;
+	Status = NtFreeVirtualMemory(
+		NtCurrentProcess(), &BaseAddress, &RegionSize, MEM_RELEASE);
+	ASSERT (NT_SUCCESS(Status));
+	if (!NT_SUCCESS(Status)) {
+		KexLogWarningEvent(
+			L"Failed to free memory from NtOpenKey hook procedure.\r\n"
+			L"NTSTATUS error code: %s (0x%08lx)",
+			KexRtlNtStatusToString(Status), Status);
 	} else {
-		ULONG OldProtect;
-		PVOID BaseAddress;
-		SIZE_T RegionSize;
-
-		BaseAddress = HookDestination;
-		RegionSize = 4096; // page size
-		//ASSERT (max(sizeof(KexpNtOpenKeyHook32_Win7), sizeof(KexpNtOpenKeyHook64)) <= RegionSize);
-
-		Status = NtFreeVirtualMemory(
-			NtCurrentProcess(),
-			&BaseAddress,
-			&RegionSize,
-			MEM_RELEASE);
-
-		ASSERT (NT_SUCCESS(Status));
-
-		if (!NT_SUCCESS(Status)) {
-			KexLogWarningEvent(
-				L"Failed to free memory from NtOpenKey hook procedure.\r\n\r\n"
-				L"NTSTATUS error code: %s (0x%08lx)",
-				KexRtlNtStatusToString(Status), Status);
-		} else {
-			KexLogDebugEvent(
-				L"Successfully freed memory from NtOpenKey hook procedure.\r\n\r\n"
-				L"Base address: 0x%p",
-				BaseAddress);
-		}
-
-		//
-		// Restore original syscalls.
-		// TODO: Rearrange this code so that a failure to set memory protection does not
-		// crash the process by making it impossible to call NtOpenKey.
-		// TODO: Why is region size just set to 15???
-		//
-			
-		BaseAddress = NtOpenKey;
-		RegionSize = 15;
-
-		Status = NtProtectVirtualMemory(
-			NtCurrentProcess(),
-			&BaseAddress,
-			&RegionSize,
-			PAGE_EXECUTE_WRITECOPY,
-			&OldProtect);
-
-		ASSERT (NT_SUCCESS(Status));
-
-		if (KexRtlCurrentProcessBitness() == 64) {
-			//
-			// We are 64 bit, native
-			//
-
-			BYTE SyscallTemplate[] = {
-				0x4C, 0x8B, 0xD1,					// mov r10, rcx
-				0xB8, 0x0F, 0x00, 0x00, 0x00,		// mov eax, 0x0F
-				0x0F, 0x05,							// syscall
-				0xC3								// ret
-			};
-			SyscallTemplate[4] = (BYTE)SSN_NtOpenKey;
-
-			RtlCopyMemory(NtOpenKey, SyscallTemplate, sizeof(SyscallTemplate));
-		} else if (KexRtlOperatingSystemBitness() == 64) {
-			//
-			// We are 32 bit, WOW64
-			//
-
-			if (LOWORD(OriginalBuildNumber) >= 8102) {
-				BYTE SyscallTemplate[] = {
-					0xB8, 0x0F, 0x00, 0x00, 0x00,				// mov eax, 0x0F
-					0x64, 0xFF, 0x15, 0xC0, 0x00, 0x00, 0x00,	// call fs:[0xC0]
-					0xC2, 0x0C, 0x00							// ret 12
-				};
-				SyscallTemplate[1] = (BYTE)SSN_NtOpenKey;
-
-				RtlCopyMemory(NtOpenKey, SyscallTemplate, sizeof(SyscallTemplate));
-			} else {
-				// The Win7 WOW64 stub occupies 24 bytes. MOV ECX,0 is three
-				// bytes longer and would overwrite the next syscall entry.
-				BYTE SyscallTemplate[] = {
-					0xB8, 0x0F, 0x00, 0x00, 0x00,				// mov eax, 0x0F
-					0x31, 0xC9,								// xor ecx, ecx
-					0x8D, 0x54, 0x24, 0x04,						// lea edx, [esp+4]
-					0x64, 0xFF, 0x15, 0xC0, 0x00, 0x00, 0x00,	// call [fs:0xC0]
-					0x83, 0xC4, 0x04,							// add esp, 4
-					0xC2, 0x0C, 0x00							// ret 12
-				};
-				SyscallTemplate[1] = (BYTE)SSN_NtOpenKey;
-
-				RtlCopyMemory(NtOpenKey, SyscallTemplate, sizeof(SyscallTemplate));
-			}
-		} else {
-			//
-			// We are 32 bit, native
-			//
-
-			BYTE SyscallTemplate[] = {
-				0xB8, 0xB6, 0x00, 0x00, 0x00,		// mov eax, 0xB6
-				0x8D, 0x54, 0x24, 0x04,				// lea edx, [esp+4]
-				0xCD, 0x2E,							// int 0x2E
-				0xC2, 0x0C, 0x00					// ret 12
-			};
-			SyscallTemplate[1] = (BYTE)SSN_NtOpenKey;
-			
-			RtlCopyMemory(NtOpenKey, SyscallTemplate, sizeof(SyscallTemplate));
-		}
-
-		Status = NtProtectVirtualMemory(
-			NtCurrentProcess(),
-			&BaseAddress,
-			&RegionSize,
-			OldProtect,
-			&OldProtect);
-
-		ASSERT (NT_SUCCESS(Status));
+		KexLogDebugEvent(
+			L"Successfully freed memory from NtOpenKey hook procedure.\r\n"
+			L"Base address: 0x%p", HookDestination);
 	}
 }
 

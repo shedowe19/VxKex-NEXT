@@ -2,6 +2,7 @@
 #include "kxcomp.h"
 #include <Dde.h>
 #include <ShObjIdl.h>
+#include "updaterfallback.h"
 
 STATIC VOID EnsureCOMInitialized(
 	VOID)
@@ -109,6 +110,9 @@ KXCOMAPI HRESULT WINAPI Ext_CoCreateInstance(
 		ClassContext,
 		RefIID,
 		Instance);
+
+	Result = KxpTryConfiguredUserUpdater(RefCLSID, OuterUnknown,
+		ClassContext, RefIID, Instance, Result);
 
 	if (KexIsDebugBuild) {
 		LPOLESTR RefCLSIDAsString;
