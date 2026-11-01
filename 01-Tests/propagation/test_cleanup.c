@@ -76,7 +76,7 @@ static void CopyMemory(PVOID destination, const void *source, SIZE_T length)
    intentionally converts 32/64-bit encoded hook addresses to native pointers. */
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable: 4302 4311 4312)
+#pragma warning(disable: 4302 4305 4311 4312)
 #else
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wint-to-pointer-cast"
