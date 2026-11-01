@@ -8,6 +8,8 @@ documentation, import libraries, prebuilt DLLs and debug symbols are preserved.
 ## Changes in this repository
 
 - Correct the pointer-sized output used by DLL device-path conversion on x64.
+- Restore the legacy Win7 WOW64 propagation syscall entry with 24 bytes instead
+  of 27, preserving the adjacent entry point in 32-bit child processes.
 - Construct DLL search paths in temporary buffers and publish them only after
   every operation succeeds. Preserve the original path on failure and handle
   an absent or empty `PATH` on newer loaders.

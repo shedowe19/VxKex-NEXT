@@ -14,6 +14,8 @@ if errorlevel 1 exit /b 1
 python "$testRoot\contracts\run-tests.py" --compiler cl
 if errorlevel 1 exit /b 1
 python "$testRoot\chrome\run-tests.py" --compiler cl
+if errorlevel 1 exit /b 1
+python "$testRoot\propagation\run-tests.py" --compiler cl
 exit /b %errorlevel%
 "@ | Set-Content -LiteralPath $runner -Encoding ASCII
     try {

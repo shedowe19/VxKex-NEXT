@@ -347,9 +347,11 @@ STATIC VOID KexpCleanupPropagationRemains(
 
 				RtlCopyMemory(NtOpenKey, SyscallTemplate, sizeof(SyscallTemplate));
 			} else {
+				// The Win7 WOW64 stub occupies 24 bytes. MOV ECX,0 is three
+				// bytes longer and would overwrite the next syscall entry.
 				BYTE SyscallTemplate[] = {
 					0xB8, 0x0F, 0x00, 0x00, 0x00,				// mov eax, 0x0F
-					0xB9, 0x00, 0x00, 0x00, 0x00,				// mov ecx, 0
+					0x31, 0xC9,								// xor ecx, ecx
 					0x8D, 0x54, 0x24, 0x04,						// lea edx, [esp+4]
 					0x64, 0xFF, 0x15, 0xC0, 0x00, 0x00, 0x00,	// call [fs:0xC0]
 					0x83, 0xC4, 0x04,							// add esp, 4

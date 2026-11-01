@@ -109,7 +109,9 @@ paths and identifiers for private information before sharing the log.
 The original browser inner installer used in the preceding Windows 7 experiment
 avoids this updater setup path. An online bootstrapper or an outer standalone
 package may still run Google Updater; renaming either executable does not turn it
-into the browser's inner installer. No automatic updater repair is claimed here.
+into the browser's inner installer. The propagation repair below addresses one
+loader defect affecting the updater; complete automatic updating still needs
+target-system verification.
 
 ### Updater 157: registry backup 317 and COM activation 0x800700C1
 
@@ -127,15 +129,57 @@ It contains two distinct failure stages:
    reporting from Windows 11 to Windows 10.
 
 Error 317 is `ERROR_MR_MID_NOT_FOUND`. Windows can return it when an NTSTATUS
-cannot be translated to a Win32 error. The original NTSTATUS is not present in
-the updater log. The backup caller already uses valid name/data buffers and
-handles `ERROR_MORE_DATA`; a one-WCHAR name buffer is valid for an unnamed value.
-This evidence does not establish registry corruption or justify replacing 317
-with success or deleting the existing COM registration.
+cannot be translated to a Win32 error. The backup caller already uses valid
+name/data buffers and handles `ERROR_MORE_DATA`; a one-WCHAR name buffer is valid
+for an unnamed value.
 
-COM activation is an independent issue: a local server started by COM/SCM need
-not be a child of the VxKex-enabled installer. VxKex propagation and its parent
-process subsystem-version bypass do not automatically cover that start route.
+#### Propagation overwrite and repair
+
+The later target-system investigation reproduced the failure with an ordinary
+user token while an elevated start succeeded. It then identified a three-byte
+overwrite during cleanup of the propagation hook in the 32-bit child process.
+The source independently confirms the incorrect write length in
+`KexpCleanupPropagationRemains`' legacy WOW64 branch (`build < 8102`):
+
+- The original Win7 WOW64 syscall entry occupies 24 bytes.
+- The cleanup template used five-byte `mov ecx,0` where the existing legacy hook
+  uses two-byte `xor ecx,ecx`, producing a 27-byte replacement.
+- Its final `C2 0C 00` (`ret 12`) therefore landed at offsets 24 through 26,
+  beyond the syscall entry, corrupting the adjacent entry point.
+
+Cleanup now uses the two-byte XOR, restoring exactly 24 bytes. The syscall ID,
+argument pointer, WOW64 transition and stack cleanup remain intact. Native x86,
+modern WOW64 and x64 templates are unchanged. The identity of the next function
+depends on the target NTDLL layout; that identity is not inferred from C source
+alone.
+
+The regression compiles and executes the actual cleanup routine with bounded
+memory/API doubles. It checks independently expected bytes, write sizes and
+unchanged adjacent entry points across all four template variants. The old
+source fails with a 27-byte write into the 24-byte legacy entry; the repaired
+source passes. SDK runs compile and execute the same tests in x86 and x64.
+
+```sh
+python3 01-Tests/propagation/run-tests.py
+```
+
+This repairs the propagation memory corruption rather than changing registry
+permissions, suppressing error 317 or deleting the existing COM registration.
+The target updater must be retested using the newly built DLLs with ordinary
+user rights. Elevation is not the compatibility fix.
+
+Earlier successful CI checks covered standalone API contracts and synthetic
+registry fixtures, not the affected propagated child on Windows 7. The native
+diagnostic script's exit code 0 and `COLLECTION_COMPLETE=TRUE` mean that a report
+was created, even when an API error is recorded. They do not prove that the
+child process, registry API or updater installation succeeded.
+
+#### Retest COM activation after repairing propagation
+
+The earlier COM error 193 must be retested after the overwrite is repaired.
+A local server started by COM/SCM need not be a child of the VxKex-enabled
+installer. VxKex propagation and its parent process subsystem-version bypass do
+not automatically cover that start route.
 The supplied original `ChromeSetup.exe` was subsequently unpacked without
 execution. Its embedded `bin/updater.exe` is version 157.0.8089.0, x86 PE32, with
 OS and subsystem versions **10.0**. This confirms that the payload requires a
@@ -159,7 +203,7 @@ installer is distributed by this change. To compare the installed copy, run:
 certutil -hashfile "%LOCALAPPDATA%\Google\GoogleUpdater\157.0.8089.0\updater.exe" SHA256
 ```
 
-#### Collect the native registry results
+#### Optional diagnostics if registry errors remain
 
 Download [Inspect_GoogleUpdater.ps1](../01-Development%20Utilities/Inspect_GoogleUpdater.ps1)
 to the Downloads folder. Run the following in a normal Command Prompt on the
@@ -179,8 +223,8 @@ activated, no updater is executed and nothing is uploaded.
 
 The script targets Windows PowerShell 2.0/.NET 3.5-compatible syntax and APIs.
 CI exercises the documented script entry point with synthetic registry values
-in x86 and x64 Windows PowerShell 5.1. An actual Windows 7/PowerShell 2.0 run and
-the failing machine's native status are still required. A fresh PowerShell
+in x86 and x64 Windows PowerShell 5.1. An actual Windows 7/PowerShell 2.0 run is
+not established by those checks. A fresh PowerShell
 process measures a native baseline; it does not reproduce the updater's VxKex
 module state automatically. The report records whether KexDll is loaded.
 
@@ -206,11 +250,11 @@ implementation taking precedence, wrong modules, ordinal calls, missing provider
 handling, error preservation, the eight-argument claim ABI and unchanged failure
 outputs with memory canaries.
 
-Automatic GoogleUpdater operation, long-duration stability, hardware video,
+Automatic GoogleUpdater operation after the propagation repair, long-duration stability, hardware video,
 GPU acceleration, DRM and arbitrary Windows 11 application compatibility are not
 established by these checks. The online `ChromeSetup.exe` bootstrapper can fail
 inside GoogleUpdater before it reaches the browser's original inner installer;
-that separate updater path is not repaired by this change.
+the full updater path still needs a fresh target-system test.
 
 Sources for the diagnosed callers and API contract:
 
