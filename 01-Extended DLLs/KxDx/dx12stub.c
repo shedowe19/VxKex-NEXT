@@ -85,6 +85,9 @@ KXDXAPI HRESULT WINAPI D3D12SerializeRootSignature(
 	OUT	PPVOID	Blob,
 	OUT	PPVOID	ErrorBlob OPTIONAL)
 {
+	if (!Blob) {
+		return E_INVALIDARG;
+	}
 	*Blob = NULL;
 
 	if (ErrorBlob) {
@@ -99,6 +102,9 @@ KXDXAPI HRESULT WINAPI D3D12SerializeVersionedRootSignature(
 	OUT	PPVOID	Blob,
 	OUT	PPVOID	ErrorBlob OPTIONAL)
 {
+	if (!Blob) {
+		return E_INVALIDARG;
+	}
 	*Blob = NULL;
 
 	if (ErrorBlob) {

@@ -226,6 +226,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="actfact.c" />
+    <ClCompile Include="asyncbool.c" />
     <ClCompile Include="glprstat.c" />
     <ClCompile Include="dllmain.c" />
     <ClCompile Include="firefoxpatch.c" />

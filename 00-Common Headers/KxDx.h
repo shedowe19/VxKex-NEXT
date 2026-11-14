@@ -796,6 +796,13 @@ interface ID2D1Factory1 {
 //
 
 typedef interface ID2D1Device1 ID2D1Device1;
+typedef interface ID2D1DeviceContext1 ID2D1DeviceContext1;
+
+typedef enum {
+	D2D1_DEVICE_CONTEXT_OPTIONS_NONE = 0,
+	D2D1_DEVICE_CONTEXT_OPTIONS_ENABLE_MULTITHREADED_OPTIMIZATIONS = 1,
+	D2D1_DEVICE_CONTEXT_OPTIONS_FORCE_DWORD = 0xffffffff
+} D2D1_DEVICE_CONTEXT_OPTIONS;
 
 typedef enum {
 	D2D1_RENDERING_PRIORITY_NORMAL,
@@ -808,7 +815,7 @@ typedef struct {
 	D2D1_RENDERING_PRIORITY (STDMETHODCALLTYPE *GetRenderingPriority)(ID2D1Device1 *This);
 	VOID (STDMETHODCALLTYPE *SetRenderingPriority)(ID2D1Device1 *This, D2D1_RENDERING_PRIORITY RenderingPriority);
 
-	// there is one undocumented method, CreateDeviceContext. we won't deal with that now.
+	HRESULT (STDMETHODCALLTYPE *CreateDeviceContext)(ID2D1Device1 *This, D2D1_DEVICE_CONTEXT_OPTIONS Options, ID2D1DeviceContext1 **DeviceContext);
 } ID2D1Device1Vtbl;
 
 interface ID2D1Device1 {

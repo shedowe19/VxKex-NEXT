@@ -37,20 +37,30 @@ KXCOMAPI HRESULT STDMETHODCALLTYPE CUISettings_QueryInterface(
 	IN	REFIID		RefIID,
 	OUT	PPVOID		Object)
 {
-	ASSERT (This != NULL);
-	ASSERT (RefIID != NULL);
-	ASSERT (Object != NULL);
-
+	UNREFERENCED_PARAMETER(This);
+	if (!Object) return E_POINTER;
 	*Object = NULL;
+	if (!RefIID) return E_INVALIDARG;
+	if (IsEqualIID(RefIID, &IID_IMarshal)) {
+		return KxCompQueryCachedMarshaler(KxRuntimeClassCount, (IUnknown *) &CUISettings, RefIID, Object);
+	}
 
 	if (IsEqualIID(RefIID, &IID_IUnknown) ||
 		IsEqualIID(RefIID, &IID_IAgileObject) ||
 		IsEqualIID(RefIID, &IID_IInspectable) ||
 		IsEqualIID(RefIID, &IID_IUISettings)) {
 
-		*Object = This;
+		*Object = &CUISettings;
+	} else if (IsEqualIID(RefIID, &IID_IUISettings2)) {
+		*Object = &CUISettings2;
 	} else if (IsEqualIID(RefIID, &IID_IUISettings3)) {
 		*Object = &CUISettings3;
+	} else if (IsEqualIID(RefIID, &IID_IUISettings4)) {
+		*Object = &CUISettings4;
+	} else if (IsEqualIID(RefIID, &IID_IUISettings5)) {
+		*Object = &CUISettings5;
+	} else if (IsEqualIID(RefIID, &IID_IUISettings6)) {
+		*Object = &CUISettings6;
 	} else {
 		LPOLESTR IidAsString;
 
@@ -64,6 +74,7 @@ KXCOMAPI HRESULT STDMETHODCALLTYPE CUISettings_QueryInterface(
 		return E_NOINTERFACE;
 	}
 
+	((IUnknown *) *Object)->lpVtbl->AddRef((IUnknown *) *Object);
 	return S_OK;
 }
 
@@ -87,10 +98,10 @@ KXCOMAPI HRESULT STDMETHODCALLTYPE CUISettings_GetIids(
 	IID *Array;
 	ULONG Count;
 
-	ASSERT (NumberOfIids != NULL);
-	ASSERT (IidArray != NULL);
-
-	Count = 1;
+	if (!NumberOfIids || !IidArray) return E_POINTER;
+	*NumberOfIids = 0;
+	*IidArray = NULL;
+	Count = 6;
 
 	Array = (IID *) CoTaskMemAlloc(Count * sizeof(IID));
 	if (!Array) {
@@ -98,7 +109,13 @@ KXCOMAPI HRESULT STDMETHODCALLTYPE CUISettings_GetIids(
 	}
 
 	*NumberOfIids = Count;
+	*IidArray = Array;
 	Array[0] = IID_IUISettings;
+	Array[1] = IID_IUISettings2;
+	Array[2] = IID_IUISettings3;
+	Array[3] = IID_IUISettings4;
+	Array[4] = IID_IUISettings5;
+	Array[5] = IID_IUISettings6;
 
 	return S_OK;
 }

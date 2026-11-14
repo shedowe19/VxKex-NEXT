@@ -21,8 +21,18 @@
 #pragma comment(linker, "/EXPORT:D3D11CoreCreateLayeredDevice=d3d11.D3D11CoreCreateLayeredDevice")
 #pragma comment(linker, "/EXPORT:D3D11CoreGetLayeredDeviceSize=d3d11.D3D11CoreGetLayeredDeviceSize")
 #pragma comment(linker, "/EXPORT:D3D11CoreRegisterLayers=d3d11.D3D11CoreRegisterLayers")
-#pragma comment(linker, "/EXPORT:D3D11CreateDevice=d3d11.D3D11CreateDevice")
-#pragma comment(linker, "/EXPORT:D3D11CreateDeviceAndSwapChain=d3d11.D3D11CreateDeviceAndSwapChain")
+// These two existing forwarder slots now dispatch to the adapter bridge.
+// Explicit original ordinals preserve the surrounding EAT layout on x86,
+// where .def aliases would otherwise be assigned after the pragma forwarders.
+#if defined(_M_IX86)
+#pragma comment(linker, "/EXPORT:D3D11CreateDevice=_Ext_D3D11CreateDevice@40,@23")
+#pragma comment(linker, "/EXPORT:D3D11CreateDeviceAndSwapChain=_Ext_D3D11CreateDeviceAndSwapChain@48,@24")
+#elif defined(_M_X64)
+#pragma comment(linker, "/EXPORT:D3D11CreateDevice=Ext_D3D11CreateDevice,@25")
+#pragma comment(linker, "/EXPORT:D3D11CreateDeviceAndSwapChain=Ext_D3D11CreateDeviceAndSwapChain,@26")
+#else
+#error Unsupported KxDx adapter bridge architecture
+#endif
 #pragma comment(linker, "/EXPORT:D3DPerformance_BeginEvent=d3d11.D3DPerformance_BeginEvent")
 #pragma comment(linker, "/EXPORT:D3DPerformance_EndEvent=d3d11.D3DPerformance_EndEvent")
 #pragma comment(linker, "/EXPORT:D3DPerformance_GetStatus=d3d11.D3DPerformance_GetStatus")
