@@ -1453,7 +1453,7 @@
 // All of these exports are present in both the 32-bit and 64-bit versions of the DLL.
 //
 
-#pragma comment(linker, "/EXPORT:AccessCheck=kernelbase.AccessCheck")
+#pragma comment(linker, "/EXPORT:AccessCheck=kernelbase.AccessCheck,@1")
 #pragma comment(linker, "/EXPORT:AccessCheckAndAuditAlarmW=kernelbase.AccessCheckAndAuditAlarmW")
 #pragma comment(linker, "/EXPORT:AccessCheckByType=kernelbase.AccessCheckByType")
 #pragma comment(linker, "/EXPORT:AccessCheckByTypeAndAuditAlarmW=kernelbase.AccessCheckByTypeAndAuditAlarmW")

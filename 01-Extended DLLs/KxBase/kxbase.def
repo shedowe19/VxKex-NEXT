@@ -65,6 +65,7 @@ EXPORTS
 	;; time.c
 	GetSystemTimePreciseAsFileTime
 	QueryUnbiasedInterruptTimePrecise
+	QueryInterruptTimePrecise				@1926
 
 	;; appmodel.c
 	AppPolicyGetProcessTerminationMethod
