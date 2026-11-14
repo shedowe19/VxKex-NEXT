@@ -73,6 +73,10 @@ VOID NTAPI KexPostSuccessfulInitializationApcRoutine(
 	Status = KexPatchCpiwSubsystemVersionCheck();
 	ASSERT (NT_SUCCESS(Status));
 
+	// Imports are resolved now; bind only the selected elevation/load APIs.
+	Status = KexUacPatchLoadedModules();
+	ASSERT (NT_SUCCESS(Status));
+
 	//
 	// If this APC is queued to the initial thread, force the EXE entry point
 	// or the .NET entry point if the EXE entry point could not be found.

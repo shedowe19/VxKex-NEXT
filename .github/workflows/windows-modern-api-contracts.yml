@@ -1,0 +1,96 @@
+name: Windows modern API contracts
+
+on:
+  push:
+    branches: [main, test]
+    paths:
+      - '.github/workflows/windows-modern-api-contracts.yml'
+      - '00-Common Headers/**'
+      - '00-Import Libraries/**'
+      - 'KexDll/**'
+      - '01-Extended DLLs/KxBase/**'
+      - '01-Extended DLLs/KxCom/**'
+      - '01-Extended DLLs/KxDx/**'
+      - '01-Tests/**'
+  pull_request:
+    branches: [main, test]
+    paths:
+      - '.github/workflows/windows-modern-api-contracts.yml'
+      - '00-Common Headers/**'
+      - '00-Import Libraries/**'
+      - 'KexDll/**'
+      - '01-Extended DLLs/KxBase/**'
+      - '01-Extended DLLs/KxCom/**'
+      - '01-Extended DLLs/KxDx/**'
+      - '01-Tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-modern-api-contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # Reuse the exact toolchain archive pinned by the repository build job.
+      # Tests use it in-place: no registry import, SDK install, or system copies.
+      - name: Prepare extracted VC10 and Windows 7.1 SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $sdkZip = Join-Path $env:RUNNER_TEMP 'Win7SDK-260730.zip'
+          $sdkRoot = Join-Path $env:RUNNER_TEMP 'Win7SDK'
+          $sdkUrl = 'https://github.com/YuZhouRen86/GitHubActionsBuildTools/releases/download/Win7SDK-260730/Win7SDK-260730.zip'
+          $expectedHash = '8d90703130c4bc735fa215ee14cddf868e27c156b72065c434ec747d5f120d44'
+          Invoke-WebRequest -Uri $sdkUrl -OutFile $sdkZip
+          $actualHash = (Get-FileHash -LiteralPath $sdkZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "SDK SHA256 mismatch: expected $expectedHash, got $actualHash"
+          }
+          & 7z x $sdkZip "-o$sdkRoot" -y
+          if ($LASTEXITCODE -ne 0) { throw "SDK extraction failed: $LASTEXITCODE" }
+
+      - name: Run x86 and x64 Windows contracts
+        shell: pwsh
+        run: |
+          $resultRoot = Join-Path $env:RUNNER_TEMP 'modern-api-contract-results'
+          python '01-Tests/modern-api-suite/run-tests.py' `
+            --sdk-root (Join-Path $env:RUNNER_TEMP 'Win7SDK') `
+            --out $resultRoot --architectures x86 x64 --build-probes
+          $suiteExit = $LASTEXITCODE
+          $summaryPath = Join-Path $resultRoot 'summary.json'
+          if (Test-Path -LiteralPath $summaryPath) {
+            $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
+            '### Windows modern API contracts' >> $env:GITHUB_STEP_SUMMARY
+            '| Architecture | Suite | Result |' >> $env:GITHUB_STEP_SUMMARY
+            '| --- | --- | --- |' >> $env:GITHUB_STEP_SUMMARY
+            foreach ($item in $summary.results) {
+              "| $($item.arch) | $($item.suite) | $($item.status) |" >> $env:GITHUB_STEP_SUMMARY
+            }
+            '' >> $env:GITHUB_STEP_SUMMARY
+            'Windows source contracts and owned native references only. Hardware probes are compiled, never executed; installed Win7, GPU/driver and browser acceptance are separate.' >> $env:GITHUB_STEP_SUMMARY
+          }
+          exit $suiteExit
+
+      - name: Preserve commands, inputs, raw results and probe builds
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-modern-api-contracts-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/modern-api-contract-results/
+          if-no-files-found: warn
+          retention-days: 7

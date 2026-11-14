@@ -272,7 +272,7 @@ KXCOMAPI HRESULT WINAPI WindowsCompareStringOrdinal(
 	OUT	PINT	ComparisonResult)
 {
 	INT TemporaryComparisonResult;
-	BOOLEAN String2WasNull;
+	BOOLEAN String2WasNull = FALSE;
 
 	if (ComparisonResult == NULL) {
 		return E_INVALIDARG;

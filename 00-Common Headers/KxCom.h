@@ -111,8 +111,9 @@ DEFINE_GUID(IID_IActivationFactory, 0x00000035, 0x0000, 0x0000, 0xC0, 0x00, 0x00
 // {AF86E2E0-B12D-4C6A-9C5A-D7AA65101E90}
 DEFINE_GUID(IID_IInspectable, 0xAF86E2E0, 0xB12D, 0x4C6A, 0x9C, 0x5A, 0xD7, 0xAA, 0x65, 0x10, 0x1E, 0x90);
 
-// {BBE1FA4C-B0E3-4583-BAEF-1F1B2E483E56}
-DEFINE_GUID(IID_IVectorView, 0xBBE1FA4C, 0xB0E3, 0x4583, 0xBA, 0xEF, 0x1F, 0x1B, 0x2E, 0x48, 0x3E, 0x56);
+// IVectorView<HSTRING>, not the uninstantiated generic interface definition.
+// {2F13C006-A03A-5F69-B090-75A43E33423E}
+DEFINE_GUID(IID_IVectorView, 0x2F13C006, 0xA03A, 0x5F69, 0xB0, 0x90, 0x75, 0xA4, 0x3E, 0x33, 0x42, 0x3E);
 
 // {01BF4326-ED37-4E96-B0E9-C1340D1EA158}
 DEFINE_GUID(IID_IGlobalizationPreferencesStatics, 0x01BF4326, 0xED37, 0x4E96, 0xB0, 0xE9, 0xC1, 0x34, 0x0D, 0x1E, 0xA1, 0x58);
@@ -216,6 +217,7 @@ typedef struct _IVectorView_HSTRING {
 	LONG					RefCount;
 	ULONG					NumberOfHstrings;
 	HSTRING					*HstringArray;
+	IUnknown				*Marshaler;
 } IVectorView_HSTRING;
 
 //
@@ -582,6 +584,7 @@ typedef struct _IUriRuntimeClass {
 	IUriRuntimeClassVtbl	*lpVtbl;
 	LONG					RefCount;
 	IUri					*Uri;
+	IUnknown				*Marshaler;
 } IUriRuntimeClass;
 
 typedef struct _IUriRuntimeClassFactory IUriRuntimeClassFactory;

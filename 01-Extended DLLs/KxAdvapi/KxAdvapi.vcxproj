@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -105,7 +105,7 @@
       <AdditionalDependencies>
       </AdditionalDependencies>
       <SetChecksum>true</SetChecksum>
-      <ModuleDefinitionFile>kxadvapi.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>kxadvapi32.def</ModuleDefinitionFile>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)\00-Common Headers</AdditionalIncludeDirectories>
@@ -178,7 +178,7 @@
       <AdditionalDependencies>
       </AdditionalDependencies>
       <SetChecksum>true</SetChecksum>
-      <ModuleDefinitionFile>kxadvapi.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>kxadvapi32.def</ModuleDefinitionFile>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)\00-Common Headers</AdditionalIncludeDirectories>
@@ -229,6 +229,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.c" />
+    <ClCompile Include="service.c" />
+    <ClCompile Include="servicecfg.c" />
     <ClCompile Include="forwards.c" />
     <ClCompile Include="reggval.c" />
     <ClCompile Include="regqval.c" />
@@ -240,6 +242,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="kxadvapi.def" />
+    <None Include="kxadvapi32.def" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

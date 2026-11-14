@@ -7,7 +7,9 @@ import sys
 
 def main():
     root = Path(__file__).resolve().parent
-    for suite in ('contracts', 'cli', 'loader', 'dns', 'bluetooth'):
+    for suite in ('contracts', 'cli', 'loader', 'dns', 'bluetooth', 'chrome',
+                  'propagation', 'winhttp', 'updater-com', 'services', 'uac',
+                  'loader-elevation'):
         subprocess.run([sys.executable, str(root / suite / 'run-tests.py')], check=True)
     print('All portable regression suites passed.', flush=True)
 

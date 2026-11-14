@@ -4,10 +4,21 @@
 #include <dxgi.h>
 #include <d2d1.h>
 
+#ifndef DXGI_ERROR_SDK_COMPONENT_MISSING
+#define DXGI_ERROR_SDK_COMPONENT_MISSING _HRESULT_TYPEDEF_(0x887A002DL)
+#endif
+
 HRESULT WINAPI Ext_CreateDXGIFactory1(
 	IN	REFIID	RefIID,
 	OUT	PPVOID	Factory)
 {
+	if (!Factory) {
+		return E_INVALIDARG;
+	}
+	*Factory = NULL;
+	if (!RefIID) {
+		return E_INVALIDARG;
+	}
 	if (IsEqualIID(RefIID, &IID_IDXGIFactoryMedia)) {
 		return CreateIDXGIFactoryMedia(Factory);
 	}
@@ -27,48 +38,38 @@ HRESULT WINAPI CreateDXGIFactory2(
 {
 	HRESULT Result;
 
-	Result = CreateDXGIFactory1(
-		RefIID,
-		Factory);
-
-	if (FAILED(Result)) {
-		if (
-			IsEqualIID(RefIID, &IID_IDXGIFactory2) ||
-			IsEqualIID(RefIID, &IID_IDXGIFactory3) ||
-			IsEqualIID(RefIID, &IID_IDXGIFactory4) ||
-			IsEqualIID(RefIID, &IID_IDXGIFactory5) ||
-			IsEqualIID(RefIID, &IID_IDXGIFactory6) ||
-			IsEqualIID(RefIID, &IID_IDXGIFactory7)) {
-
-			if (IsEqualIID(RefIID, &IID_IDXGIFactory2)) {		
-				KexLogErrorEvent(
-					L"Failed to create IDXGIFactory2\r\n\r\n"
-					L"HRESULT error code: 0x%08lx: %s\r\n"
-					L"This interface is only supported by Windows 7 with Platform Update. "
-					L"In order to solve this error, install Platform Update.",
-					Result, Win32ErrorAsString(Result));
+	if (!Factory) {
+		return E_INVALIDARG;
+	}
+	*Factory = NULL;
+	if (!RefIID) {
+		return E_INVALIDARG;
+	}
+	if (Flags & 1) {
+		// DXGI_CREATE_FACTORY_DEBUG cannot be supplied by a normal factory.
+		return DXGI_ERROR_SDK_COMPONENT_MISSING;
+	}
+	Result = CreateDXGIFactory1(RefIID, Factory);
+	if (SUCCEEDED(Result)) {
+		return Result;
+	}
+	if (IsEqualIID(RefIID, &IID_IDXGIFactory3) ||
+		IsEqualIID(RefIID, &IID_IDXGIFactory4) ||
+		IsEqualIID(RefIID, &IID_IDXGIFactory5) ||
+		IsEqualIID(RefIID, &IID_IDXGIFactory6) ||
+		IsEqualIID(RefIID, &IID_IDXGIFactory7)) {
+		// Call the native factory directly: recursing into this function for
+		// IID_IDXGIFactory2 never terminates without Platform Update.
+		Result = CreateDXGIFactory1(&IID_IDXGIFactory2, Factory);
+		if (SUCCEEDED(Result)) {
+			Result = WrapDXGIFactory((IDXGIFactory2 **) Factory, Flags);
+			if (FAILED(Result)) {
+				IDXGIFactory2 *Native = (IDXGIFactory2 *) *Factory;
+				Native->lpVtbl->Release(Native);
+				*Factory = NULL;
 			}
-
-			KexLogInformationEvent(
-				L"Redirected unsupported DXGI factory to IDXGIFactory2 + wrapper\r\n\r\n"
-				L"HRESULT error code: 0x%08lx: %s",
-				Result, Win32ErrorAsString(Result));
-
-			Result = CreateDXGIFactory2(0, &IID_IDXGIFactory2, Factory);
-
-			if (SUCCEEDED(Result)) {
-				WrapDXGIFactory((IDXGIFactory2 *) *Factory);
-			}
-		} else {
-			//
-			// TODO: Paint.NET depends on IDXGIFactory7.
-			// See if we can implement that in a satisfactory way.
-			//
-
-			ReportNoInterfaceError(RefIID, Result, L"Failed to create DXGI factory");
 		}
 	}
-
 	return Result;
 }
 
@@ -90,6 +91,9 @@ HRESULT WINAPI Ext_D2D1CreateFactory(
 {
 	HRESULT Result;
 
+	if (!Factory) return E_INVALIDARG;
+	*Factory = NULL;
+	if (!RefIID) return E_INVALIDARG;
 	Result = D2D1CreateFactory(
 		FactoryType,
 		RefIID,
@@ -123,7 +127,12 @@ HRESULT WINAPI Ext_D2D1CreateFactory(
 			//
 
 			if (SUCCEEDED(Result)) {
-				WrapDirect2DFactory((ID2D1Factory1 *) *Factory);
+				Result = WrapDirect2DFactory((ID2D1Factory1 **) Factory);
+				if (FAILED(Result)) {
+					ID2D1Factory1 *Native = (ID2D1Factory1 *) *Factory;
+					Native->lpVtbl->Base.Base.Release((IUnknown *) Native);
+					*Factory = NULL;
+				}
 			}
 		} else {
 			HRESULT Result2;

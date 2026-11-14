@@ -1,6 +1,14 @@
 #include "buildcfg.h"
 #include "kxcomp.h"
 
+STATIC HRESULT KxCompValidateUriString(HSTRING String, BOOL AllowEmpty)
+{
+	// Native WinRT Uri uses the NUL-terminated URL parser even when the HSTRING
+	// extends beyond an embedded NUL. Match that measured constructor behavior;
+	// runtime class identifiers are validated separately using their full length.
+	return !AllowEmpty && WindowsIsStringEmpty(String) ? E_INVALIDARG : S_OK;
+}
+
 HRESULT STDMETHODCALLTYPE CUriRuntimeClass_QueryInterface(
 	IN	IUriRuntimeClass	*This,
 	IN	REFIID				RefIID,
@@ -11,6 +19,9 @@ HRESULT STDMETHODCALLTYPE CUriRuntimeClass_QueryInterface(
 	ASSERT (Interface != NULL);
 
 	*Interface = NULL;
+	if (IsEqualIID(RefIID, &IID_IMarshal)) {
+		return This->Marshaler->lpVtbl->QueryInterface(This->Marshaler, RefIID, Interface);
+	}
 
 	if (IsEqualIID(RefIID, &IID_IUnknown) ||
 		IsEqualIID(RefIID, &IID_IAgileObject) ||
@@ -39,6 +50,8 @@ ULONG STDMETHODCALLTYPE CUriRuntimeClass_Release(
 	NewRefCount = InterlockedDecrement(&This->RefCount);
 
 	if (NewRefCount == 0) {
+		This->Marshaler->lpVtbl->Release(This->Marshaler);
+		This->Uri->lpVtbl->Release(This->Uri);
 		SafeFree(This);
 	}
 
@@ -64,6 +77,7 @@ HRESULT STDMETHODCALLTYPE CUriRuntimeClass_GetIids(
 	}
 
 	*NumberOfIids = Count;
+	*IidArray = Array;
 	Array[0] = IID_IUriRuntimeClass;
 
 	return S_OK;
@@ -335,10 +349,23 @@ HRESULT STDMETHODCALLTYPE CUriRuntimeClass_Equals(
 {
 	HRESULT Result;
 	BOOL Equal;
+	HSTRING OtherText;
+	IUri *OtherNativeUri;
 
-	Result = This->Uri->lpVtbl->IsEqual(This->Uri, OtherUri->Uri, &Equal);
-
-	*IsEqual = Equal;
+	if (!IsEqual) return E_POINTER;
+	*IsEqual = FALSE;
+	if (!OtherUri) return E_INVALIDARG;
+	Result = OtherUri->lpVtbl->get_AbsoluteUri(OtherUri, &OtherText);
+	if (FAILED(Result)) return Result;
+	Result = KxCompValidateUriString(OtherText, FALSE);
+	if (FAILED(Result)) { WindowsDeleteString(OtherText); return Result; }
+	Result = CreateUri(WindowsGetStringRawBuffer(OtherText, NULL),
+		Uri_CREATE_CANONICALIZE, 0, &OtherNativeUri);
+	WindowsDeleteString(OtherText);
+	if (FAILED(Result)) return Result;
+	Result = This->Uri->lpVtbl->IsEqual(This->Uri, OtherNativeUri, &Equal);
+	OtherNativeUri->lpVtbl->Release(OtherNativeUri);
+	if (SUCCEEDED(Result)) *IsEqual = (BOOLEAN) Equal;
 	return Result;
 }
 
@@ -347,8 +374,30 @@ HRESULT STDMETHODCALLTYPE CUriRuntimeClass_CombineUri(
 	IN	HSTRING				ExtraPart,
 	OUT	IUriRuntimeClass	**NewUri)
 {
-	KexDebugCheckpoint();
-	return E_NOTIMPL;
+	IUriRuntimeClass *Combined;
+	HRESULT Result;
+	if (!NewUri) return E_POINTER;
+	*NewUri = NULL;
+	Result = KxCompValidateUriString(ExtraPart, TRUE);
+	if (FAILED(Result)) return Result;
+	Combined = SafeAlloc(IUriRuntimeClass, 1);
+	if (!Combined) return E_OUTOFMEMORY;
+	Combined->lpVtbl = This->lpVtbl;
+	Combined->RefCount = 1;
+	Result = CoInternetCombineUrlEx(This->Uri,
+		WindowsGetStringRawBuffer(ExtraPart, NULL), 0, &Combined->Uri, 0);
+	if (FAILED(Result)) {
+		SafeFree(Combined);
+		return Result;
+	}
+	Result = CoCreateFreeThreadedMarshaler((IUnknown *) Combined, &Combined->Marshaler);
+	if (FAILED(Result)) {
+		Combined->Uri->lpVtbl->Release(Combined->Uri);
+		SafeFree(Combined);
+		return Result;
+	}
+	*NewUri = Combined;
+	return S_OK;
 }
 
 IUriRuntimeClassVtbl CUriRuntimeClassVtbl = {
@@ -383,22 +432,8 @@ HRESULT STDMETHODCALLTYPE CUriRuntimeClassFactory_QueryInterface(
 	IN	REFIID					RefIID,
 	OUT	PPVOID					Interface)
 {
-	ASSERT (This != NULL);
-	ASSERT (RefIID != NULL);
-	ASSERT (Interface != NULL);
-
-	*Interface = NULL;
-
-	if (IsEqualIID(RefIID, &IID_IUnknown) ||
-		IsEqualIID(RefIID, &IID_IAgileObject) ||
-		IsEqualIID(RefIID, &IID_IInspectable) ||
-		IsEqualIID(RefIID, &IID_IUriRuntimeClassFactory)) {
-
-		*Interface = This;
-		return S_OK;
-	}
-
-	return E_NOINTERFACE;
+	UNREFERENCED_PARAMETER(This);
+	return KxCompQueryBuiltinFactory(KxRuntimeUri, RefIID, Interface);
 }
 
 ULONG STDMETHODCALLTYPE CUriRuntimeClassFactory_AddRef(
@@ -418,41 +453,42 @@ HRESULT STDMETHODCALLTYPE CUriRuntimeClassFactory_GetIids(
 	OUT	PULONG					NumberOfIids,
 	OUT	IID						**IidArray)
 {
-	IID *Array;
-	ULONG Count;
-
-	ASSERT (NumberOfIids != NULL);
-	ASSERT (IidArray != NULL);
-
-	Count = 1;
-
-	Array = (IID *) CoTaskMemAlloc(Count * sizeof(IID));
-	if (!Array) {
-		return E_OUTOFMEMORY;
-	}
-
-	*NumberOfIids = Count;
-	Array[0] = IID_IUriRuntimeClassFactory;
-
-	return S_OK;
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeUri, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetIids(Factory, NumberOfIids, IidArray);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 HRESULT STDMETHODCALLTYPE CUriRuntimeClassFactory_GetRuntimeClassName(
 	IN	IUriRuntimeClassFactory	*This,
 	OUT	HSTRING					*ClassName)
 {
-	PCWSTR Name = L"Windows.Foundation.Uri";
-	ASSERT (ClassName != NULL);
-	return WindowsCreateString(Name, (ULONG) wcslen(Name), ClassName);
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeUri, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetRuntimeClassName(Factory, ClassName);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 HRESULT STDMETHODCALLTYPE CUriRuntimeClassFactory_GetTrustLevel(
 	IN	IUriRuntimeClassFactory	*This,
 	OUT	TrustLevel				*Level)
 {
-	ASSERT (Level != NULL);
-	*Level = BaseTrust;
-	return S_OK;
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeUri, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetTrustLevel(Factory, Level);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 HRESULT STDMETHODCALLTYPE CUriRuntimeClassFactory_CreateUri(
@@ -463,7 +499,10 @@ HRESULT STDMETHODCALLTYPE CUriRuntimeClassFactory_CreateUri(
 	HRESULT Result;
 	IUriRuntimeClass *RuntimeClass;
 
-	ASSERT (UriRuntimeClass != NULL);
+	if (!UriRuntimeClass) return E_POINTER;
+	*UriRuntimeClass = NULL;
+	Result = KxCompValidateUriString(Uri, FALSE);
+	if (FAILED(Result)) return Result;
 
 	RuntimeClass = SafeAlloc(IUriRuntimeClass, 1);
 	if (!RuntimeClass) {
@@ -488,6 +527,12 @@ HRESULT STDMETHODCALLTYPE CUriRuntimeClassFactory_CreateUri(
 	}
 
 	ASSERT (RuntimeClass != NULL);
+	Result = CoCreateFreeThreadedMarshaler((IUnknown *) RuntimeClass, &RuntimeClass->Marshaler);
+	if (FAILED(Result)) {
+		RuntimeClass->Uri->lpVtbl->Release(RuntimeClass->Uri);
+		SafeFree(RuntimeClass);
+		return Result;
+	}
 	*UriRuntimeClass = RuntimeClass;
 	return S_OK;
 }
@@ -498,8 +543,15 @@ HRESULT STDMETHODCALLTYPE CUriRuntimeClassFactory_CreateWithRelativeUri(
 	IN	HSTRING					RelativeUri,
 	OUT	IUriRuntimeClass		**UriRuntimeClass)
 {
-	KexDebugCheckpoint();
-	return E_NOTIMPL;
+	IUriRuntimeClass *Base;
+	HRESULT Result;
+	if (!UriRuntimeClass) return E_POINTER;
+	*UriRuntimeClass = NULL;
+	Result = CUriRuntimeClassFactory_CreateUri(This, BaseUri, &Base);
+	if (FAILED(Result)) return Result;
+	Result = Base->lpVtbl->CombineUri(Base, RelativeUri, UriRuntimeClass);
+	Base->lpVtbl->Release(Base);
+	return Result;
 }
 
 IUriRuntimeClassFactoryVtbl CUriRuntimeClassFactoryVtbl = {

@@ -7,9 +7,40 @@ KXBASEAPI BOOL WINAPI GetProcessInformation(
 	OUT	PVOID						ProcessInformation,
 	IN	ULONG						ProcessInformationSize)
 {
-	// TODO
-	BaseSetLastNTError(STATUS_NOT_IMPLEMENTED);
-	return FALSE;
+	NTSTATUS Status;
+	PAGE_PRIORITY_INFORMATION PagePriority;
+	ULONG LastError;
+
+	if (ProcessInformationClass != ProcessMemoryPriority) {
+		BaseSetLastNTError((ULONG) ProcessInformationClass >= ProcessInformationClassMax ?
+			STATUS_INVALID_PARAMETER : STATUS_NOT_SUPPORTED);
+		return FALSE;
+	}
+
+	if (ProcessInformationSize != sizeof(PagePriority)) {
+		BaseSetLastNTError(STATUS_INFO_LENGTH_MISMATCH);
+		return FALSE;
+	}
+
+	LastError = GetLastError();
+	Status = NtQueryInformationProcess(ProcessHandle, ProcessPagePriority,
+		&PagePriority, sizeof(PagePriority), NULL);
+	if (!NT_SUCCESS(Status)) {
+		BaseSetLastNTError(Status);
+		return FALSE;
+	}
+
+	// Publish only a completed kernel query. Native Windows returns NOACCESS for
+	// an inaccessible output buffer rather than exposing an access violation.
+	try {
+		*(PPAGE_PRIORITY_INFORMATION) ProcessInformation = PagePriority;
+	} except(EXCEPTION_EXECUTE_HANDLER) {
+		BaseSetLastNTError(GetExceptionCode());
+		return FALSE;
+	}
+
+	SetLastError(LastError);
+	return TRUE;
 }
 
 KXBASEAPI BOOL WINAPI SetProcessInformation(
@@ -18,76 +49,51 @@ KXBASEAPI BOOL WINAPI SetProcessInformation(
 	IN	PVOID						ProcessInformation,
 	IN	ULONG						ProcessInformationSize)
 {
-	// TODO
-	BaseSetLastNTError(STATUS_NOT_IMPLEMENTED);
-	return FALSE;
-}
+	NTSTATUS Status;
+	PAGE_PRIORITY_INFORMATION PagePriority;
+	ULONG LastError;
 
-KXBASEAPI BOOL WINAPI SetProcessDefaultCpuSets(
-	IN	HANDLE	ProcessHandle,
-	IN	PULONG	CpuSetIds,
-	IN	ULONG	NumberOfCpuSetIds)
-{
-	if (CpuSetIds == NULL) {
-		if (NumberOfCpuSetIds != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
+	if (ProcessInformationClass != ProcessMemoryPriority) {
+		BaseSetLastNTError((ULONG) ProcessInformationClass >= ProcessInformationClassMax ?
+			STATUS_INVALID_PARAMETER : STATUS_NOT_SUPPORTED);
+		return FALSE;
 	}
 
+	if (ProcessInformationSize != sizeof(PagePriority)) {
+		BaseSetLastNTError(STATUS_INFO_LENGTH_MISMATCH);
+		return FALSE;
+	}
+
+	LastError = GetLastError();
+	try {
+		PagePriority = *(PPAGE_PRIORITY_INFORMATION) ProcessInformation;
+	} except(EXCEPTION_EXECUTE_HANDLER) {
+		BaseSetLastNTError(GetExceptionCode());
+		return FALSE;
+	}
+
+	// Public MEMORY_PRIORITY_INFORMATION permits priorities 1 through 5.
+	// Use the real Win7 memory-manager policy, not the CPU priority or a cache.
+	if (PagePriority.PagePriority < 1 || PagePriority.PagePriority > 5) {
+		BaseSetLastNTError(STATUS_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	Status = NtSetInformationProcess(ProcessHandle, ProcessPagePriority,
+		&PagePriority, sizeof(PagePriority));
+	if (!NT_SUCCESS(Status)) {
+		BaseSetLastNTError(Status);
+		return FALSE;
+	}
+
+	SetLastError(LastError);
 	return TRUE;
 }
 
-KXBASEAPI BOOL WINAPI SetProcessDefaultCpuSetMasks(
-	IN	HANDLE			ProcessHandle,
-	IN	PGROUP_AFFINITY	CpuSetMasks,
-	IN	ULONG			NumberOfCpuSetMasks)
-{
-	if (CpuSetMasks == NULL) {
-		if (NumberOfCpuSetMasks != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
-
-KXBASEAPI BOOL WINAPI GetProcessDefaultCpuSets(
-	IN	HANDLE	ProcessHandle,
-	OUT	PULONG	CpuSetIds,
-	IN	ULONG	CpuSetIdArraySize,
-	OUT	PULONG	ReturnCount)
-{
-	*ReturnCount = 0;
-
-	if (CpuSetIds == NULL) {
-		if (CpuSetIdArraySize != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
-
-KXBASEAPI BOOL WINAPI GetProcessDefaultCpuSetMasks(
-	IN	HANDLE			ProcessHandle,
-	OUT	PGROUP_AFFINITY	CpuSetMasks,
-	IN	ULONG			CpuSetMaskArraySize,
-	OUT	PULONG			ReturnCount)
-{
-	*ReturnCount = 0;
-
-	if (CpuSetMasks == NULL) {
-		if (CpuSetMaskArraySize != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
+//
+// CPU set APIs live in cpuset.c. They are implemented with the real processor
+// topology and Windows 7 affinity instead of the previous success-only stubs.
+//
 
 KXBASEAPI BOOL WINAPI SetProcessMitigationPolicy(
 	IN	PROCESS_MITIGATION_POLICY	MitigationPolicy,

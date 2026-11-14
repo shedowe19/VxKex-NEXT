@@ -7,22 +7,8 @@ HRESULT STDMETHODCALLTYPE CLauncherStatics_QueryInterface(
 	IN	REFIID				RefIID,
 	OUT	PPVOID				Interface)
 {
-	ASSERT (This != NULL);
-	ASSERT (RefIID != NULL);
-	ASSERT (Interface != NULL);
-
-	*Interface = NULL;
-
-	if (IsEqualIID(RefIID, &IID_IUnknown) ||
-		IsEqualIID(RefIID, &IID_IAgileObject) ||
-		IsEqualIID(RefIID, &IID_IInspectable) ||
-		IsEqualIID(RefIID, &IID_ILauncherStatics)) {
-
-		*Interface = This;
-		return S_OK;
-	}
-
-	return E_NOINTERFACE;
+	UNREFERENCED_PARAMETER(This);
+	return KxCompQueryBuiltinFactory(KxRuntimeLauncher, RefIID, Interface);
 }
 
 ULONG STDMETHODCALLTYPE CLauncherStatics_AddRef(
@@ -42,41 +28,42 @@ HRESULT STDMETHODCALLTYPE CLauncherStatics_GetIids(
 	OUT	PULONG				NumberOfIids,
 	OUT	IID					**IidArray)
 {
-	IID *Array;
-	ULONG Count;
-
-	ASSERT (NumberOfIids != NULL);
-	ASSERT (IidArray != NULL);
-
-	Count = 1;
-
-	Array = (IID *) CoTaskMemAlloc(Count * sizeof(IID));
-	if (!Array) {
-		return E_OUTOFMEMORY;
-	}
-
-	*NumberOfIids = Count;
-	Array[0] = IID_ILauncherStatics;
-
-	return S_OK;
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeLauncher, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetIids(Factory, NumberOfIids, IidArray);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 HRESULT STDMETHODCALLTYPE CLauncherStatics_GetRuntimeClassName(
 	IN	ILauncherStatics	*This,
 	OUT	HSTRING				*ClassName)
 {
-	PCWSTR Name = L"Windows.System.Launcher";
-	ASSERT (ClassName != NULL);
-	return WindowsCreateString(Name, (ULONG) wcslen(Name), ClassName);
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeLauncher, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetRuntimeClassName(Factory, ClassName);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 HRESULT STDMETHODCALLTYPE CLauncherStatics_GetTrustLevel(
 	IN	ILauncherStatics	*This,
 	OUT	TrustLevel			*Level)
 {
-	ASSERT (Level != NULL);
-	*Level = BaseTrust;
-	return S_OK;
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeLauncher, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetTrustLevel(Factory, Level);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 HRESULT STDMETHODCALLTYPE CLauncherStatics_LaunchFileAsync(
@@ -84,7 +71,10 @@ HRESULT STDMETHODCALLTYPE CLauncherStatics_LaunchFileAsync(
 	IN	IUnknown			*StorageFile,
 	OUT	IAsyncOperation		**AsyncOperation)
 {
-	KexDebugCheckpoint(); // not properly implemented
+	UNREFERENCED_PARAMETER(This);
+	UNREFERENCED_PARAMETER(StorageFile);
+	if (!AsyncOperation) return E_POINTER;
+	*AsyncOperation = NULL;
 	return E_NOTIMPL;
 }
 
@@ -105,33 +95,47 @@ HRESULT STDMETHODCALLTYPE CLauncherStatics_LaunchUriAsync(
 {
 	HRESULT Result;
 	HSTRING RawUri;
-	HINSTANCE ShellExecuteResult;
+	HSTRING Scheme;
+	BOOL EmbeddedNull;
+	BOOLEAN Launched;
+	SHELLEXECUTEINFOW Execute;
+	UNREFERENCED_PARAMETER(This);
+	if (!AsyncOperation) return E_POINTER;
+	*AsyncOperation = NULL;
+	if (!Uri) return E_POINTER;
 
 	Result = Uri->lpVtbl->get_AbsoluteUri(Uri, &RawUri);
 	if (FAILED(Result)) {
 		return Result;
 	}
 
-	ShellExecuteResult = ShellExecute(
-		NULL,
-		L"open",
-		WindowsGetStringRawBuffer(RawUri, NULL),
-		NULL,
-		NULL,
-		SW_SHOW);
-
-	WindowsDeleteString(RawUri);
-
-	if (((ULONG) ShellExecuteResult) <= 32) {
-		return E_FAIL;
+	Result = WindowsStringHasEmbeddedNull(RawUri, &EmbeddedNull);
+	if (FAILED(Result) || EmbeddedNull || WindowsIsStringEmpty(RawUri)) {
+		WindowsDeleteString(RawUri);
+		return FAILED(Result) ? Result : E_INVALIDARG;
 	}
-
-	// HACK: Some apps (e.g. Spotify) require a valid pointer to be passed out.
-	// However it seems to do fine if we just pass a pointer to some random
-	// interface such as ourselves.
-	*AsyncOperation = (IAsyncOperation *) This;
-
-	return S_OK;
+	Result = Uri->lpVtbl->get_SchemeName(Uri, &Scheme);
+	if (FAILED(Result)) {
+		WindowsDeleteString(RawUri);
+		return Result;
+	}
+	// LaunchUriAsync does not provide the LaunchFileAsync contract.
+	if (WindowsIsStringEmpty(Scheme) ||
+		CompareStringOrdinal(WindowsGetStringRawBuffer(Scheme, NULL), -1, L"file", -1, TRUE) == CSTR_EQUAL) {
+		WindowsDeleteString(Scheme);
+		WindowsDeleteString(RawUri);
+		return KxCompCreateCompletedBooleanOperation(FALSE, AsyncOperation);
+	}
+	WindowsDeleteString(Scheme);
+	ZeroMemory(&Execute, sizeof(Execute));
+	Execute.cbSize = sizeof(Execute);
+	Execute.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+	Execute.lpVerb = L"open";
+	Execute.lpFile = WindowsGetStringRawBuffer(RawUri, NULL);
+	Execute.nShow = SW_SHOWNORMAL;
+	Launched = (BOOLEAN) !!ShellExecuteExW(&Execute);
+	WindowsDeleteString(RawUri);
+	return KxCompCreateCompletedBooleanOperation(Launched, AsyncOperation);
 }
 
 HRESULT STDMETHODCALLTYPE CLauncherStatics_LaunchUriWithOptionsAsync(
@@ -140,7 +144,9 @@ HRESULT STDMETHODCALLTYPE CLauncherStatics_LaunchUriWithOptionsAsync(
 	IN	IUnknown			*LauncherOptions,
 	OUT	IAsyncOperation		**AsyncOperation)
 {
-	KexDebugCheckpoint(); // not properly implemented
+	if (!AsyncOperation) return E_POINTER;
+	*AsyncOperation = NULL;
+	if (LauncherOptions) return E_NOTIMPL;
 	return CLauncherStatics_LaunchUriAsync(This, Uri, AsyncOperation);
 }
 

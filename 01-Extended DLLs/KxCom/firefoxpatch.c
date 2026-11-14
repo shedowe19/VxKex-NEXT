@@ -2,6 +2,7 @@
 #include "kxcomp.h"
 #include <Dde.h>
 #include <ShObjIdl.h>
+#include "updaterfallback.h"
 
 STATIC VOID EnsureCOMInitialized(
 	VOID)
@@ -103,12 +104,17 @@ KXCOMAPI HRESULT WINAPI Ext_CoCreateInstance(
 
 	EnsureCOMInitialized();
 
+	if (!OuterUnknown) KxCompTryInheritServiceForClass(RefCLSID, ClassContext);
+
 	Result = CoCreateInstance(
 		RefCLSID,
 		OuterUnknown,
 		ClassContext,
 		RefIID,
 		Instance);
+
+	Result = KxpTryConfiguredUserUpdater(RefCLSID, OuterUnknown,
+		ClassContext, RefIID, Instance, Result);
 
 	if (KexIsDebugBuild) {
 		LPOLESTR RefCLSIDAsString;
@@ -150,6 +156,8 @@ KXCOMAPI HRESULT WINAPI Ext_CoCreateInstanceEx(
 
 	EnsureCOMInitialized();
 
+	if (!OuterUnknown && !ServerInfo) KxCompTryInheritServiceForClass(RefCLSID, ClassContext);
+
 	Result = CoCreateInstanceEx(
 		RefCLSID,
 		OuterUnknown,
@@ -171,6 +179,8 @@ KXCOMAPI HRESULT WINAPI Ext_CoGetClassObject(
 	HRESULT Result;
 
 	EnsureCOMInitialized();
+
+	if (!ServerInfo) KxCompTryInheritServiceForClass(RefCLSID, ClassContext);
 
 	Result = CoGetClassObject(
 		RefCLSID,

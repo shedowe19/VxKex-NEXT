@@ -1,0 +1,7 @@
+LIBRARY KxUac
+EXPORTS
+    ShellExecuteA=KxuShellExecuteA @1
+    ShellExecuteW=KxuShellExecuteW @2
+    ShellExecuteExA=KxuShellExecuteExA @3
+    ShellExecuteExW=KxuShellExecuteExW @4
+

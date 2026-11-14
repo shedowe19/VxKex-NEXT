@@ -54,3 +54,13 @@ KXBASEAPI VOID WINAPI QueryUnbiasedInterruptTimePrecise(
 {
 	QueryUnbiasedInterruptTime(UnbiasedInterruptTimePrecise);
 }
+//
+// Windows 7 fallback: elapsed boot time includes suspended time.
+// Return 100-nanosecond units, but retain GetTickCount64 clock resolution;
+// this does not emulate the hardware precision of Windows 10.
+//
+KXBASEAPI VOID WINAPI QueryInterruptTimePrecise(
+	OUT	PULONGLONG	InterruptTimePrecise)
+{
+	*InterruptTimePrecise = GetTickCount64() * 10000ULL;
+}

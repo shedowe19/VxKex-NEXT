@@ -20,18 +20,27 @@ HRESULT WINAPI CreateIDXGIFactoryMedia(
 // direct2d.c
 //
 
-VOID WrapDirect2DDevice(
-	IN OUT	ID2D1Device *Device);
+HRESULT WrapDirect2DDevice(
+	IN OUT	ID2D1Device **Device,
+	IN		ID2D1Factory2 *Owner);
 
-VOID WrapDirect2DFactory(
-	IN OUT	ID2D1Factory1 *Factory);
+HRESULT WrapDirect2DFactory(
+	IN OUT	ID2D1Factory1 **Factory);
 
 //
 // dxgi.c
 //
 
-VOID WrapDXGIFactory(
-	IN OUT	IDXGIFactory2 *Factory);
+HRESULT WrapDXGIFactory(
+	IN OUT	IDXGIFactory2 **Factory,
+	IN		ULONG CreationFlags);
+
+// A borrowed foreign/null adapter passes through unchanged. Our own adapter is
+// unwrapped and AddRef-pinned until the caller releases the native reference.
+// Additional native AddRef must not change the API caller's LastError.
+IDXGIAdapter *KxPinNativeDXGIAdapter(
+	IN	IDXGIAdapter *Adapter,
+	OUT	PBOOL Pinned);
 
 //
 // rptnoint.c

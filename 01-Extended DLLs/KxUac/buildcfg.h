@@ -1,0 +1,6 @@
+#pragma once
+#define KEX_ENV_WIN32
+#define KEX_TARGET_TYPE_DLL
+#define KEX_COMPONENT L"KxUac"
+#define KEX_DISABLE_GRAPHICAL_ASSERTS
+

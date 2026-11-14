@@ -45,6 +45,9 @@ STATIC HRESULT STDMETHODCALLTYPE CVectorView_HSTRING_QueryInterface(
 	ASSERT (Interface != NULL);
 
 	*Interface = NULL;
+	if (IsEqualIID(RefIID, &IID_IMarshal)) {
+		return This->Marshaler->lpVtbl->QueryInterface(This->Marshaler, RefIID, Interface);
+	}
 
 	if (IsEqualIID(RefIID, &IID_IUnknown) ||
 		IsEqualIID(RefIID, &IID_IAgileObject) ||
@@ -77,6 +80,7 @@ STATIC ULONG STDMETHODCALLTYPE CVectorView_HSTRING_Release(
 	NewRefCount = InterlockedDecrement(&This->RefCount);
 
 	if (NewRefCount == 0) {
+		if (This->Marshaler) This->Marshaler->lpVtbl->Release(This->Marshaler);
 		until (This->NumberOfHstrings == 0) {
 			// get rid of all hstrings in array
 			WindowsDeleteString(This->HstringArray[--This->NumberOfHstrings]);
@@ -108,6 +112,7 @@ STATIC HRESULT STDMETHODCALLTYPE CVectorView_HSTRING_GetIids(
 	}
 
 	*NumberOfIids = Count;
+	*IidArray = Array;
 	Array[0] = IID_IVectorView;
 
 	return S_OK;
@@ -199,29 +204,28 @@ STATIC HRESULT STDMETHODCALLTYPE CVectorView_HSTRING_GetMany(
 	OUT	HSTRING				*Items,
 	OUT	PULONG				NumberOfItemsOut)
 {
-	ULONG Index;
-
-	ASSERT (This != NULL);
-	ASSERT (Items != NULL);
-	ASSERT (NumberOfItemsOut != NULL);
-
-	RtlZeroMemory(Items, NumberOfItems * sizeof(*Items));
+	ULONG Index, Count;
+	if (!NumberOfItemsOut) return E_POINTER;
 	*NumberOfItemsOut = 0;
-
-	for (Index = StartIndex; Index < This->NumberOfHstrings; ++Index) {
+	if (StartIndex > This->NumberOfHstrings) return E_BOUNDS;
+	if (!NumberOfItems) return S_OK;
+	if (!Items) return E_POINTER;
+	Count = min(NumberOfItems, This->NumberOfHstrings - StartIndex);
+	for (Index = 0; Index < Count; ++Index) {
 		HRESULT Result;
 
 		Result = WindowsDuplicateString(
-			This->HstringArray[Index],
-			&Items[Index - StartIndex]);
+			This->HstringArray[StartIndex + Index],
+			&Items[Index]);
 
 		if (FAILED(Result)) {
 			// deallocate all strings that were created up to this point and return
 			// a failure status
 
-			until (Index == StartIndex) {
+			until (Index == 0) {
 				--Index;
-				WindowsDeleteString(Items[Index - StartIndex]);
+				WindowsDeleteString(Items[Index]);
+				Items[Index] = NULL;
 			}
 
 			*NumberOfItemsOut = 0;
@@ -230,9 +234,6 @@ STATIC HRESULT STDMETHODCALLTYPE CVectorView_HSTRING_GetMany(
 
 		++*NumberOfItemsOut;
 
-		if (*NumberOfItemsOut == NumberOfItems) {
-			break;
-		}
 	}
 
 	return S_OK;
@@ -265,23 +266,8 @@ STATIC HRESULT STDMETHODCALLTYPE CGlobalizationPreferencesStatics_QueryInterface
 	IN	REFIID								RefIID,
 	OUT	PPVOID								Interface)
 {
-	ASSERT (This != NULL);
-	ASSERT (RefIID != NULL);
-	ASSERT (Interface != NULL);
-
-	*Interface = NULL;
-
-	if (IsEqualIID(RefIID, &IID_IUnknown) ||
-		IsEqualIID(RefIID, &IID_IAgileObject) ||
-		IsEqualIID(RefIID, &IID_IInspectable) ||
-		IsEqualIID(RefIID, &IID_IGlobalizationPreferencesStatics)) {
-
-		*Interface = This;
-	} else {
-		return E_NOINTERFACE;
-	}
-
-	return S_OK;
+	UNREFERENCED_PARAMETER(This);
+	return KxCompQueryBuiltinFactory(KxRuntimeGlobalizationPreferences, RefIID, Interface);
 }
 
 STATIC ULONG STDMETHODCALLTYPE CGlobalizationPreferencesStatics_AddRef(
@@ -301,41 +287,42 @@ STATIC HRESULT STDMETHODCALLTYPE CGlobalizationPreferencesStatics_GetIids(
 	OUT	PULONG				NumberOfIids,
 	OUT	IID					**IidArray)
 {
-	IID *Array;
-	ULONG Count;
-
-	ASSERT (NumberOfIids != NULL);
-	ASSERT (IidArray != NULL);
-
-	Count = 1;
-
-	Array = (IID *) CoTaskMemAlloc(Count * sizeof(IID));
-	if (!Array) {
-		return E_OUTOFMEMORY;
-	}
-
-	*NumberOfIids = Count;
-	Array[0] = IID_IGlobalizationPreferencesStatics;
-
-	return S_OK;
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeGlobalizationPreferences, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetIids(Factory, NumberOfIids, IidArray);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 STATIC HRESULT STDMETHODCALLTYPE CGlobalizationPreferencesStatics_GetRuntimeClassName(
 	IN	IGlobalizationPreferencesStatics	*This,
 	OUT	HSTRING								*ClassName)
 {
-	PCWSTR Name = L"Windows.System.UserProfile.GlobalizationPreferences";
-	ASSERT (ClassName != NULL);
-	return WindowsCreateString(Name, (ULONG) wcslen(Name), ClassName);
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeGlobalizationPreferences, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetRuntimeClassName(Factory, ClassName);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 STATIC HRESULT STDMETHODCALLTYPE CGlobalizationPreferencesStatics_GetTrustLevel(
 	IN	IGlobalizationPreferencesStatics	*This,
 	OUT	TrustLevel							*Level)
 {
-	ASSERT (Level != NULL);
-	*Level = BaseTrust;
-	return S_OK;
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeGlobalizationPreferences, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetTrustLevel(Factory, Level);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 // Couldn't be bothered to implement the rest.
@@ -357,6 +344,8 @@ STATIC HRESULT STDMETHODCALLTYPE CGlobalizationPreferencesStatics_get_Languages(
 	ULONG LocaleNameCch;
 	HSTRING LocaleNameHstring;
 	IVectorView_HSTRING *NewVectorView;
+	if (!VectorView) return E_POINTER;
+	*VectorView = NULL;
 
 	//
 	// Get the user's locale name and make a HSTRING out of it.
@@ -384,6 +373,7 @@ STATIC HRESULT STDMETHODCALLTYPE CGlobalizationPreferencesStatics_get_Languages(
 
 	NewVectorView = SafeAlloc(IVectorView_HSTRING, 1);
 	if (!NewVectorView) {
+		WindowsDeleteString(LocaleNameHstring);
 		return E_OUTOFMEMORY;
 	}
 
@@ -392,11 +382,17 @@ STATIC HRESULT STDMETHODCALLTYPE CGlobalizationPreferencesStatics_get_Languages(
 	NewVectorView->HstringArray = SafeAlloc(HSTRING, NewVectorView->NumberOfHstrings);
 
 	if (!NewVectorView->HstringArray) {
+		WindowsDeleteString(LocaleNameHstring);
 		SafeFree(NewVectorView);
 		return E_OUTOFMEMORY;
 	}
 	
 	NewVectorView->HstringArray[0] = LocaleNameHstring;
+	Result = CoCreateFreeThreadedMarshaler((IUnknown *) NewVectorView, &NewVectorView->Marshaler);
+	if (FAILED(Result)) {
+		NewVectorView->lpVtbl->Release(NewVectorView);
+		return Result;
+	}
 	*VectorView = NewVectorView;
 	return S_OK;
 }

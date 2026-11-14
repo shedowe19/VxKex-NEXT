@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32"><Configuration>Debug</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32"><Configuration>Release</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals"><ProjectGuid>{8A86F955-7C95-4640-8720-B1D5178A9AF0}</ProjectGuid><Keyword>Win32Proj</Keyword><RootNamespace>KxUac</RootNamespace></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration"><ConfigurationType>DynamicLibrary</ConfigurationType><UseDebugLibraries>true</UseDebugLibraries><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration"><ConfigurationType>DynamicLibrary</ConfigurationType><UseDebugLibraries>true</UseDebugLibraries><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration"><ConfigurationType>DynamicLibrary</ConfigurationType><UseDebugLibraries>false</UseDebugLibraries><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration"><ConfigurationType>DynamicLibrary</ConfigurationType><UseDebugLibraries>false</UseDebugLibraries><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup><LinkIncremental>false</LinkIncremental><GenerateManifest>false</GenerateManifest></PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><CompileAs>CompileAsC</CompileAs><CallingConvention>StdCall</CallingConvention>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)\00-Common Headers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <Optimization>Disabled</Optimization><BufferSecurityCheck>false</BufferSecurityCheck><ExceptionHandling>false</ExceptionHandling><MinimalRebuild>false</MinimalRebuild><MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem><EntryPointSymbol>DllMain</EntryPointSymbol><SetChecksum>true</SetChecksum><GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(TargetDir);$(SolutionDir)\00-Import Libraries;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>KexDll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <ModuleDefinitionFile>kxuac.def</ModuleDefinitionFile>
+    </Link>
+    <ResourceCompile><AdditionalIncludeDirectories>$(SolutionDir)\00-Common Headers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><CompileAs>CompileAsC</CompileAs><CallingConvention>StdCall</CallingConvention>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)\00-Common Headers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <Optimization>Disabled</Optimization><BufferSecurityCheck>false</BufferSecurityCheck><ExceptionHandling>false</ExceptionHandling><MinimalRebuild>false</MinimalRebuild><MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem><EntryPointSymbol>DllMain</EntryPointSymbol><SetChecksum>true</SetChecksum><GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(TargetDir);$(SolutionDir)\00-Import Libraries;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>KexDll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <ModuleDefinitionFile>kxuac.def</ModuleDefinitionFile>
+    </Link>
+    <ResourceCompile><AdditionalIncludeDirectories>$(SolutionDir)\00-Common Headers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><CompileAs>CompileAsC</CompileAs><CallingConvention>StdCall</CallingConvention>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)\00-Common Headers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <Optimization>MinSpace</Optimization><BufferSecurityCheck>false</BufferSecurityCheck><ExceptionHandling>false</ExceptionHandling><MinimalRebuild>false</MinimalRebuild><MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem><EntryPointSymbol>DllMain</EntryPointSymbol><SetChecksum>true</SetChecksum><GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(TargetDir);$(SolutionDir)\00-Import Libraries;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>KexDll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <ModuleDefinitionFile>kxuac.def</ModuleDefinitionFile>
+    </Link>
+    <ResourceCompile><AdditionalIncludeDirectories>$(SolutionDir)\00-Common Headers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><CompileAs>CompileAsC</CompileAs><CallingConvention>StdCall</CallingConvention>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)\00-Common Headers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <Optimization>MinSpace</Optimization><BufferSecurityCheck>false</BufferSecurityCheck><ExceptionHandling>false</ExceptionHandling><MinimalRebuild>false</MinimalRebuild><MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem><EntryPointSymbol>DllMain</EntryPointSymbol><SetChecksum>true</SetChecksum><GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(TargetDir);$(SolutionDir)\00-Import Libraries;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>KexDll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <ModuleDefinitionFile>kxuac.def</ModuleDefinitionFile>
+    </Link>
+    <ResourceCompile><AdditionalIncludeDirectories>$(SolutionDir)\00-Common Headers;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup><ClInclude Include="buildcfg.h" /></ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="dllmain.c" />
+    <ClCompile Include="client.c" />
+  </ItemGroup>
+  <ItemGroup><None Include="kxuac.def" /></ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
+

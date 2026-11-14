@@ -235,7 +235,7 @@
 #pragma comment(linker, "/EXPORT:WinHttpGetDefaultProxyConfiguration=winhttp.WinHttpGetDefaultProxyConfiguration")
 #pragma comment(linker, "/EXPORT:WinHttpGetIEProxyConfigForCurrentUser=winhttp.WinHttpGetIEProxyConfigForCurrentUser")
 #pragma comment(linker, "/EXPORT:WinHttpGetProxyForUrl=winhttp.WinHttpGetProxyForUrl")
-#pragma comment(linker, "/EXPORT:WinHttpOpen=winhttp.WinHttpOpen")
+// WinHttpOpen is implemented in winhttp_open.c.
 #pragma comment(linker, "/EXPORT:WinHttpOpenRequest=winhttp.WinHttpOpenRequest")
 #pragma comment(linker, "/EXPORT:WinHttpQueryAuthSchemes=winhttp.WinHttpQueryAuthSchemes")
 #pragma comment(linker, "/EXPORT:WinHttpQueryDataAvailable=winhttp.WinHttpQueryDataAvailable")

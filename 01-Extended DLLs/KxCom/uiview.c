@@ -30,22 +30,8 @@ HRESULT STDMETHODCALLTYPE CUIViewSettingsInterop_QueryInterface(
 	IN	REFIID					RefIID,
 	OUT	PPVOID					Interface)
 {
-	ASSERT (This != NULL);
-	ASSERT (RefIID != NULL);
-	ASSERT (Interface != NULL);
-
-	*Interface = NULL;
-
-	if (IsEqualIID(RefIID, &IID_IUnknown) ||
-		IsEqualIID(RefIID, &IID_IAgileObject) ||
-		IsEqualIID(RefIID, &IID_IInspectable) ||
-		IsEqualIID(RefIID, &IID_IUIViewSettingsInterop)) {
-
-		*Interface = This;
-		return S_OK;
-	}
-
-	return E_NOINTERFACE;
+	UNREFERENCED_PARAMETER(This);
+	return KxCompQueryBuiltinFactory(KxRuntimeUIViewSettings, RefIID, Interface);
 }
 
 ULONG STDMETHODCALLTYPE CUIViewSettingsInterop_AddRef(
@@ -65,41 +51,42 @@ HRESULT STDMETHODCALLTYPE CUIViewSettingsInterop_GetIids(
 	OUT	PULONG					NumberOfIids,
 	OUT	IID						**IidArray)
 {
-	IID *Array;
-	ULONG Count;
-
-	ASSERT (NumberOfIids != NULL);
-	ASSERT (IidArray != NULL);
-
-	Count = 1;
-
-	Array = (IID *) CoTaskMemAlloc(Count * sizeof(IID));
-	if (!Array) {
-		return E_OUTOFMEMORY;
-	}
-
-	*NumberOfIids = Count;
-	Array[0] = IID_IUIViewSettingsInterop;
-
-	return S_OK;
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeUIViewSettings, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetIids(Factory, NumberOfIids, IidArray);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 HRESULT STDMETHODCALLTYPE CUIViewSettingsInterop_GetRuntimeClassName(
 	IN	IUIViewSettingsInterop	*This,
 	OUT	HSTRING					*ClassName)
 {
-	PCWSTR Name = L"Windows.UI.ViewManagement.UISettings";
-	ASSERT (ClassName != NULL);
-	return WindowsCreateString(Name, (ULONG) wcslen(Name), ClassName);
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeUIViewSettings, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetRuntimeClassName(Factory, ClassName);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 HRESULT STDMETHODCALLTYPE CUIViewSettingsInterop_GetTrustLevel(
 	IN	IUIViewSettingsInterop	*This,
 	OUT	TrustLevel				*Level)
 {
-	ASSERT (Level != NULL);
-	*Level = BaseTrust;
-	return S_OK;
+	IActivationFactory *Factory;
+	HRESULT Result;
+	UNREFERENCED_PARAMETER(This);
+	Result = KxCompQueryBuiltinFactory(KxRuntimeUIViewSettings, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->GetTrustLevel(Factory, Level);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }
 
 HRESULT STDMETHODCALLTYPE CUIViewSettingsInterop_GetForWindow(
@@ -136,6 +123,9 @@ HRESULT STDMETHODCALLTYPE CUIViewSettings_QueryInterface(
 	ASSERT (Interface != NULL);
 
 	*Interface = NULL;
+	if (IsEqualIID(RefIID, &IID_IMarshal)) {
+		return KxCompQueryCachedMarshaler(KxRuntimeClassCount + 1, (IUnknown *) This, RefIID, Interface);
+	}
 
 	if (IsEqualIID(RefIID, &IID_IUnknown) ||
 		IsEqualIID(RefIID, &IID_IAgileObject) ||
@@ -180,6 +170,7 @@ HRESULT STDMETHODCALLTYPE CUIViewSettings_GetIids(
 	}
 
 	*NumberOfIids = Count;
+	*IidArray = Array;
 	Array[0] = IID_IUIViewSettings;
 
 	return S_OK;
@@ -189,7 +180,7 @@ HRESULT STDMETHODCALLTYPE CUIViewSettings_GetRuntimeClassName(
 	IN	IUIViewSettings	*This,
 	OUT	HSTRING			*ClassName)
 {
-	PCWSTR Name = L"Windows.UI.ViewManagement.UISettings";
+	PCWSTR Name = L"Windows.UI.ViewManagement.UIViewSettings";
 	ASSERT (ClassName != NULL);
 	return WindowsCreateString(Name, (ULONG) wcslen(Name), ClassName);
 }

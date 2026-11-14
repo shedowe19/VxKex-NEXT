@@ -6,20 +6,16 @@ KXCOMAPI HRESULT WINAPI RoGetActivationFactory(
 	IN	REFIID	RefIID,
 	OUT	PPVOID	Factory)
 {
-	LPOLESTR RefIIDAsString;
-
-	StringFromIID(RefIID, &RefIIDAsString);
-
-	KexLogDetailEvent(
-		L"RoGetActivationFactory called\r\n\r\n"
-		L"ActivatableClassId: %s\r\n"
-		L"IID:                %s",
-		WindowsGetStringRawBuffer(ActivatableClassId, NULL),
-		RefIIDAsString);
-
-	CoTaskMemFree(RefIIDAsString);
-
-	return CActivationFactory_QueryInterface(&CActivationFactory, RefIID, Factory);
+	IActivationFactory *ClassFactory;
+	HRESULT Result;
+	if (!Factory) return E_POINTER;
+	*Factory = NULL;
+	if (!RefIID) return E_INVALIDARG;
+	Result = KxCompResolveActivationFactory(ActivatableClassId, &ClassFactory);
+	if (FAILED(Result)) return Result;
+	Result = ClassFactory->lpVtbl->QueryInterface(ClassFactory, RefIID, Factory);
+	ClassFactory->lpVtbl->Release(ClassFactory);
+	return Result;
 }
 
 // Added for Cavalry
@@ -45,12 +41,13 @@ KXCOMAPI HRESULT WINAPI RoActivateInstance(
 	IN	HSTRING			ActivatableClassId,
 	OUT	IInspectable	**Instance)
 {
-	ASSERT (Instance != NULL);
-
-	KexLogDetailEvent(
-		L"RoActivateInstance called: %s",
-		WindowsGetStringRawBuffer(ActivatableClassId, NULL));
-
-	*Instance = (IInspectable *) &CActivationFactory;
-	return S_OK;
+	IActivationFactory *Factory;
+	HRESULT Result;
+	if (!Instance) return E_POINTER;
+	*Instance = NULL;
+	Result = RoGetActivationFactory(ActivatableClassId, &IID_IActivationFactory, (PPVOID) &Factory);
+	if (FAILED(Result)) return Result;
+	Result = Factory->lpVtbl->ActivateInstance(Factory, Instance);
+	Factory->lpVtbl->Release(Factory);
+	return Result;
 }

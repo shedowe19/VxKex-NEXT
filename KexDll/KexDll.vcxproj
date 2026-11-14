@@ -283,6 +283,7 @@
     <ClCompile Include="etw.c" />
     <ClCompile Include="except.c" />
     <ClCompile Include="initapc.c" />
+    <ClCompile Include="uacroute.c" />
     <ClCompile Include="kexdata.c" />
     <ClCompile Include="kexhe.c" />
     <ClCompile Include="kexhk.c" />

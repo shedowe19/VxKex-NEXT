@@ -19,6 +19,10 @@ documentation, import libraries, prebuilt DLLs and debug symbols are preserved.
   flags and Boolean argument lengths in the configuration tool.
 - Add six classic Bluetooth enumeration exports, forwarded to the real Windows
   system implementation. This follows the work proposed in upstream PR #470.
+- Route the missing dynamic `ntdll!RtlGetDeviceFamilyInfoEnum` lookup to the
+  existing KexDll implementation while preserving native lookup precedence and
+  the real NTDLL handle. Add `NCryptCreateClaim` with `NTE_NOT_SUPPORTED` and
+  unchanged failure outputs; preserve existing KxCryp export ordinals.
 - Stop builds and packaging when a required step fails, reject incomplete
   installers, and run build and regression checks for `main` and pull requests.
 
@@ -32,6 +36,8 @@ Portable behavior tests compile the actual changed C routines with controlled
 Windows API substitutes. They cover path updates and failure rollback, x64
 buffer handling, DEP process handles, CLI arguments, DNS completion races and
 Bluetooth forwarding. Loader tests additionally use AddressSanitizer and UBSan.
+Chrome compatibility tests exercise the actual lookup wrapper and eight-argument
+claim function, including error preservation, output canaries and ordinal calls.
 
 ```sh
 python3 01-Tests/run-tests.py
@@ -39,6 +45,7 @@ python3 01-Tests/run-tests.py
 
 The Windows workflow installs the original hash-pinned Windows 7.1 SDK toolchain,
 runs x86/x64 mitigation contract tests and build-script failure-injection tests,
+as well as the Chrome compatibility contracts with the original SDK compiler,
 then builds and packages both Debug and Release installers for both architectures.
 Current results are available in
 [GitHub Actions](https://github.com/shedowe19/VxKex-NEXT/actions).

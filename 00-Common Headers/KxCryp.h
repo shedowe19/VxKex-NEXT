@@ -180,3 +180,13 @@ KXCRYPAPI NTSTATUS WINAPI BCryptHash(
 	IN	ULONG				InputCb,
 	OUT	PUCHAR				Output,
 	IN	ULONG				OutputCb);
+
+KXCRYPAPI SECURITY_STATUS WINAPI NCryptCreateClaim(
+	IN	NCRYPT_KEY_HANDLE	SubjectKey,
+	IN	NCRYPT_KEY_HANDLE	AuthorityKey OPTIONAL,
+	IN	DWORD				ClaimType,
+	IN	NCryptBufferDesc		*ParameterList OPTIONAL,
+	OUT	PBYTE				ClaimBlob OPTIONAL,
+	IN	DWORD				ClaimBlobCb,
+	OUT	DWORD				*ResultCb,
+	IN	DWORD				Flags);

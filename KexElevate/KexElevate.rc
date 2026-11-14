@@ -1,0 +1,3 @@
+// Keep the helper asInvoker. Only the caller\'s native runas requests UAC.
+1 24 "KexElevate.manifest"
+
