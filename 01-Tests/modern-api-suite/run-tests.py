@@ -22,6 +22,7 @@ SUITES = {
     'winrt': 'Full production HSTRING/factory/URI/vector bodies with native COM/URLMON/FTM references',
     'nt': 'Expanded owned native reference versus production-body class58 fallback',
     'graphics': 'Production outer-COM and D3D11 bridge sources, independent lifetime/ABI backends; no GPU rendering',
+    'cpuset': 'Production CPU set topology and affinity implementation with native reference',
 }
 NATIVE_FLAGS = ['/nologo', '/W4', '/WX', '/O2', '/MT', '/DUNICODE', '/D_UNICODE', '/D_WIN32_WINNT=0x0601', '/DWINVER=0x0601']
 
@@ -101,14 +102,18 @@ def smoke(commands, compiler, arch):
         raise RuntimeError('Toolchain smoke executable did not run')
 
 
-def existing_runner(commands, compiler, name):
-    directory = {'process': 'process-modern', 'cfgmgr': 'cfgmgr-modern', 'async': 'async-review', 'winrt': 'winrt-modern'}[name]
-    output = commands.run('runner', [sys.executable, REPO / '01-Tests' / directory / 'run-tests.py',
-                                     '--compiler', compiler, '--keep-output', commands.directory], timeout=150)
+def existing_runner(commands, compiler, name, arch):
+    directory = {'process': 'process-modern', 'cfgmgr': 'cfgmgr-modern', 'async': 'async-review', 'winrt': 'winrt-modern', 'cpuset': 'cpuset-modern'}[name]
+    arguments = [sys.executable, REPO / '01-Tests' / directory / 'run-tests.py',
+                 '--compiler', compiler, '--keep-output', commands.directory]
+    if name == 'cpuset':
+        arguments.extend(['--ntdll-lib', 'ntdll_x64.lib' if arch == 'x64' else 'ntdll_x86.lib'])
+    output = commands.run('runner', arguments, timeout=150)
     patterns = {'process': r'process-memory contract: ([1-9][0-9]*) assertions, 0 failures',
                 'cfgmgr': r'cfgmgr notification contract: ([1-9][0-9]*) assertions, 0 failures',
                 'async': r'OVERLAP_SUMMARY\|checks=([1-9][0-9]*)\|failures=0\|live_allocations=0\|live_handlers=0\|live_git=0\|overlaps=0',
-                'winrt': r'WINRT_SUMMARY\|checks=([1-9][0-9]*)\|failures=0\|owned_allocations=0\|instance_marshalers=0\|cached_marshalers=[0-9]+'}
+                'winrt': r'WINRT_SUMMARY\|checks=([1-9][0-9]*)\|failures=0\|owned_allocations=0\|instance_marshalers=0\|cached_marshalers=[0-9]+',
+                'cpuset': r'CPUSET_SUMMARY\|checks=([1-9][0-9]*)\|failures=0'}
     match = re.search(patterns[name], output)
     if not match:
         raise RuntimeError('Missing successful runtime summary for ' + name)
@@ -210,7 +215,7 @@ def build_probes(commands, compiler):
 
 def source_pins():
     files = set(HERE.glob('*'))
-    for name in ['process-modern', 'cfgmgr-modern', 'async-review', 'winrt-modern', 'nt-modern', 'nt-gate-review', 'graphics-modern']:
+    for name in ['process-modern', 'cfgmgr-modern', 'async-review', 'winrt-modern', 'nt-modern', 'nt-gate-review', 'graphics-modern', 'cpuset-modern']:
         files.update((REPO / '01-Tests' / name).glob('*'))
     files.update((REPO / '00-Common Headers').glob('*.h'))
     files.update((REPO / '00-Import Libraries').glob('*.lib'))
@@ -218,6 +223,7 @@ def source_pins():
         files.update((REPO / '01-Extended DLLs' / name).glob('*.h'))
     files.update([REPO / 'KexDll/ntps.c', REPO / 'KexDll/buildcfg.h', REPO / 'KexDll/kexdllp.h',
                   REPO / '01-Extended DLLs/KxBase/process.c', REPO / '01-Extended DLLs/KxBase/cfgmgr.c',
+                  REPO / '01-Extended DLLs/KxBase/cpuset.c', REPO / '01-Extended DLLs/KxBase/thread.c',
                   REPO / '01-Extended DLLs/KxCom/asyncbool.c'])
     files.update((REPO / '01-Extended DLLs/KxDx').glob('*.c'))
     files.update((REPO / '01-Extended DLLs/KxCom').glob('*.c'))
@@ -259,7 +265,7 @@ def main():
             commands = Commands(directory, environment)
             row = {'arch': arch, 'suite': name}
             try:
-                if name in ['process', 'cfgmgr', 'async', 'winrt']: detail = existing_runner(commands, compiler, name)
+                if name in ['process', 'cfgmgr', 'async', 'winrt', 'cpuset']: detail = existing_runner(commands, compiler, name, arch)
                 elif name == 'nt': detail = nt_contract(commands, compiler, link, arch)
                 elif name == 'graphics': detail = graphics_contract(commands, compiler)
                 else: detail = build_probes(commands, compiler)

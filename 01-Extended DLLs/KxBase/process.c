@@ -90,71 +90,10 @@ KXBASEAPI BOOL WINAPI SetProcessInformation(
 	return TRUE;
 }
 
-KXBASEAPI BOOL WINAPI SetProcessDefaultCpuSets(
-	IN	HANDLE	ProcessHandle,
-	IN	PULONG	CpuSetIds,
-	IN	ULONG	NumberOfCpuSetIds)
-{
-	if (CpuSetIds == NULL) {
-		if (NumberOfCpuSetIds != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
-
-KXBASEAPI BOOL WINAPI SetProcessDefaultCpuSetMasks(
-	IN	HANDLE			ProcessHandle,
-	IN	PGROUP_AFFINITY	CpuSetMasks,
-	IN	ULONG			NumberOfCpuSetMasks)
-{
-	if (CpuSetMasks == NULL) {
-		if (NumberOfCpuSetMasks != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
-
-KXBASEAPI BOOL WINAPI GetProcessDefaultCpuSets(
-	IN	HANDLE	ProcessHandle,
-	OUT	PULONG	CpuSetIds,
-	IN	ULONG	CpuSetIdArraySize,
-	OUT	PULONG	ReturnCount)
-{
-	*ReturnCount = 0;
-
-	if (CpuSetIds == NULL) {
-		if (CpuSetIdArraySize != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
-
-KXBASEAPI BOOL WINAPI GetProcessDefaultCpuSetMasks(
-	IN	HANDLE			ProcessHandle,
-	OUT	PGROUP_AFFINITY	CpuSetMasks,
-	IN	ULONG			CpuSetMaskArraySize,
-	OUT	PULONG			ReturnCount)
-{
-	*ReturnCount = 0;
-
-	if (CpuSetMasks == NULL) {
-		if (CpuSetMaskArraySize != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
+//
+// CPU set APIs live in cpuset.c. They are implemented with the real processor
+// topology and Windows 7 affinity instead of the previous success-only stubs.
+//
 
 KXBASEAPI BOOL WINAPI SetProcessMitigationPolicy(
 	IN	PROCESS_MITIGATION_POLICY	MitigationPolicy,

@@ -26,7 +26,7 @@ def main():
     source = (root / '01-Extended DLLs/KxBase/process.c').read_text(encoding='utf-8-sig')
     header = (root / '00-Common Headers/KxBase.h').read_text(encoding='utf-8-sig')
     declarations = between(header, 'typedef enum _PROCESS_INFORMATION_CLASS {', '\n} TYPEDEF_TYPE_NAME(PROCESS_INFORMATION_CLASS);') + '\n} PROCESS_INFORMATION_CLASS;'
-    functions = between(source, 'KXBASEAPI BOOL WINAPI GetProcessInformation(', '\nKXBASEAPI BOOL WINAPI SetProcessDefaultCpuSets(')
+    functions = between(source, 'KXBASEAPI BOOL WINAPI GetProcessInformation(', '\nKXBASEAPI BOOL WINAPI SetProcessMitigationPolicy(')
     harness = (here / 'process_memory_test.c').read_text(encoding='utf-8')
     harness = harness.replace('/* PROCESS_INFORMATION_CLASS */', declarations).replace('/* PROCESS_INFORMATION_FUNCTIONS */', functions)
     compiler = args.compiler or shutil.which('cl')

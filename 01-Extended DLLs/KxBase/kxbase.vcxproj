@@ -225,6 +225,7 @@
     <ClCompile Include="appstate.c" />
     <ClCompile Include="cfgmgr.c" />
     <ClCompile Include="conansi.c" />
+    <ClCompile Include="cpuset.c" />
     <ClCompile Include="console.c" />
     <ClCompile Include="consup.c" />
     <ClCompile Include="critsect.c" />

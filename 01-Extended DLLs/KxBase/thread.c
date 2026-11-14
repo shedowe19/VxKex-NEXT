@@ -283,71 +283,9 @@ Exit:
 	return NT_SUCCESS(Status);
 }
 
-KXBASEAPI BOOL WINAPI SetThreadSelectedCpuSets(
-	IN	HANDLE	ThreadHandle,
-	IN	PULONG	CpuSetIds,
-	IN	ULONG	NumberOfCpuSetIds)
-{
-	if (CpuSetIds == NULL) {
-		if (NumberOfCpuSetIds != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
-
-KXBASEAPI BOOL WINAPI SetThreadSelectedCpuSetMasks(
-	IN	HANDLE			ThreadHandle,
-	IN	PGROUP_AFFINITY	CpuSetMasks,
-	IN	ULONG			NumberOfCpuSetMasks)
-{
-	if (CpuSetMasks == NULL) {
-		if (NumberOfCpuSetMasks != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
-
-KXBASEAPI BOOL WINAPI GetThreadSelectedCpuSets(
-	IN	HANDLE	ThreadHandle,
-	OUT	PULONG	CpuSetIds,
-	IN	ULONG	CpuSetIdArraySize,
-	OUT	PULONG	ReturnCount)
-{
-	*ReturnCount = 0;
-
-	if (CpuSetIds == NULL) {
-		if (CpuSetIdArraySize != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
-
-KXBASEAPI BOOL WINAPI GetThreadSelectedCpuSetMasks(
-	IN	HANDLE			ThreadHandle,
-	OUT	PGROUP_AFFINITY	CpuSetMasks,
-	IN	ULONG			CpuSetMaskArraySize,
-	OUT	PULONG			ReturnCount)
-{
-	*ReturnCount = 0;
-
-	if (CpuSetMasks == NULL) {
-		if (CpuSetMaskArraySize != 0) {
-			BaseSetLastNTError(STATUS_INVALID_PARAMETER);
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-}
+//
+// CPU set APIs live in cpuset.c.
+//
 
 KXBASEAPI BOOL WINAPI SetThreadpoolTimerEx(
 	IN	OUT	PTP_TIMER	pti,
@@ -360,16 +298,9 @@ KXBASEAPI BOOL WINAPI SetThreadpoolTimerEx(
 	return isThreadpoolTimerSet;
 }
 
-KXBASEAPI BOOL WINAPI GetSystemCpuSetInformation(
-	PVOID		Information,
-	ULONG		BufferLength,
-	PULONG		ReturnedLength,
-	HANDLE		Process,
-	ULONG		Flags)
-{
-	SetLastError(ERROR_NOT_SUPPORTED);
-	return FALSE;
-}
+//
+// CPU set APIs live in cpuset.c.
+//
 
 KXBASEAPI int WINAPI Ext_GetThreadPriority(
 	IN	HANDLE	hThread)
