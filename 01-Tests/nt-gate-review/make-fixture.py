@@ -12,7 +12,9 @@ def main():
     parser.add_argument('--out',required=True,type=Path)
     args=parser.parse_args()
     original=Path(__file__).resolve().parents[1]/'nt-modern/HandleTables.c'
-    data=original.read_bytes()
+    # The pin covers reviewed content, not the checkout's line-ending style.
+    # A Windows CI checkout may materialize this text file with CRLF.
+    data=original.read_bytes().replace(b'\r\n',b'\n')
     expected='0c797a29df11dc35fccda1e44c3cd7dc6069b1c72b82a26216fcebb2b601497e'
     if hashlib.sha256(data).hexdigest()!=expected:
         raise SystemExit('Base fixture changed; review the extension and update its pin first')

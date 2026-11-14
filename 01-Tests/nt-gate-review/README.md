@@ -4,7 +4,8 @@ This extends the owned `nt-modern/HandleTables.c` matrix with lengths0–3
 combined with misaligned output, unaligned ReturnLength, inaccessible
 ReturnLength, and an output aligned to four but not eight bytes. The original
 rights, cooperative child, known handles, boundary and terminated-child cases
-remain present. The generator verifies the reviewed base source hash first.
+remain present. The generator verifies the reviewed base source content hash
+after normalizing CRLF so a Windows checkout cannot change the pin.
 
 In a VC10/Windows7 SDK architecture-specific command prompt:
 
