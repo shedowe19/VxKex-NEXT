@@ -7,6 +7,8 @@ EXPORTS
 	ResolveDelayLoadedAPI					= KexDll.KexLdrResolveDelayLoadedAPI
 
 	;; thread.c
+	TlsGetValue2							@1927
+	FlsGetValue2							@1928
 	GetThreadDescription
 	SetThreadDescription
 	GetCurrentThreadStackLimits

@@ -382,3 +382,33 @@ KXBASEAPI int WINAPI Ext_GetThreadPriority(
 	}
 	return Priority;
 }
+
+//
+// The *GetValue2 variants return the native slot value without changing the
+// calling thread's last error. Delegate allocation, index validation and
+// thread/fiber ownership to Windows 7 rather than maintaining shadow slots.
+// This preserves semantics, not the newer Windows fast-path performance.
+//
+KXBASEAPI PVOID WINAPI TlsGetValue2(
+	IN	DWORD	TlsIndex)
+{
+	DWORD SavedError;
+	PVOID Value;
+
+	SavedError = GetLastError();
+	Value = TlsGetValue(TlsIndex);
+	SetLastError(SavedError);
+	return Value;
+}
+
+KXBASEAPI PVOID WINAPI FlsGetValue2(
+	IN	DWORD	FlsIndex)
+{
+	DWORD SavedError;
+	PVOID Value;
+
+	SavedError = GetLastError();
+	Value = FlsGetValue(FlsIndex);
+	SetLastError(SavedError);
+	return Value;
+}
